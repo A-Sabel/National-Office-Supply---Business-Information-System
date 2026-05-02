@@ -1,0 +1,12 @@
+pytest
+setuptools
+wheel
+# --- Database & Environment ---
+psycopg2-binary==2.9.12
+python-dotenv==1.0.1
+
+# --- Data Generation & Testing ---
+faker==40.15.0
+
+# --- Linting & Development (Optional but recommended) ---
+black          # Code formatter for team consistency
