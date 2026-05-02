@@ -1,11 +1,16 @@
 pytest
 setuptools
 wheel
+# --- UI Framework ---
+customtkinter==5.2.2
+Pillow==10.2.0
+packaging==26.2
+
 # --- Database & Environment ---
 psycopg2-binary==2.9.12
 python-dotenv==1.0.1
 
-# --- Data Generation & Testing ---
+# --- Data Generation ---
 faker==40.15.0
 
 # --- Linting & Development (Optional but recommended) ---
