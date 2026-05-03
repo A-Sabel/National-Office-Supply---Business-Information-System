@@ -27,7 +27,7 @@ class NavigationSidebar(ctk.CTkFrame):
 
         # Logo Placement
         try:
-            logo_path = r"national_office_supply_BIS_project\national_office_supply_BIS\src\assets\logo2.png"
+            logo_path = r"national_office_supply_BIS_project\national_office_supply_BIS\src\assets\logo3.png"
             self.logo_image = ctk.CTkImage(light_image=Image.open(logo_path),
                                            dark_image=Image.open(logo_path),
                                            size=(100, 50))
