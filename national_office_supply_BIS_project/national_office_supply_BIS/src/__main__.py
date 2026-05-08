@@ -76,18 +76,7 @@ class NationalOfficeApp(ctk.CTk):
         print("Navigation: Orders")
 
     def show_inventory(self):
-        self._clear_content()
-        db_config = {
-            "dbname": "school db",
-            "user": "postgres",
-            "password": "repane91",
-            "host": "localhost",
-            "port": 5432,
-        }
-        self.current_view = InventorySalesReportView(
-            self.content_container, controller=self, db_config=db_config
-        )
-        self.current_view.grid(row=0, column=0, sticky="nsew")
+        print("Navigation: Inventory")
 
     def show_payroll(self):
         print("Navigation: Payroll")
