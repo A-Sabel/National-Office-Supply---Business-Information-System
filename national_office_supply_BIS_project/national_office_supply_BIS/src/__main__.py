@@ -6,6 +6,9 @@ from frontend.modular.top_bar import TopBar
 from frontend.tabs.dashboard import DashboardView
 from frontend.tabs.customers import CustomersView
 
+ctk.set_appearance_mode("light") 
+ctk.set_default_color_theme("blue")
+
 class NationalOfficeApp(ctk.CTk):
     def __init__(self, role="Manager"):
         super().__init__()
@@ -51,11 +54,6 @@ class NationalOfficeApp(ctk.CTk):
         self.current_view = DashboardView(self.content_container, self,
                                         username=username, role=role)
         self.current_view.grid(row=0, column=0, sticky="nsew")
-
-
-    def _clear_content(self):
-        for widget in self.content_container.winfo_children():
-            widget.destroy()
 
     # --- Navigation Placeholders ---
     def show_customers(self):

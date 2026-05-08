@@ -1,176 +1,467 @@
 import customtkinter as ctk
-from tkinter import ttk, messagebox
+import tkinter as tk
+from tkinter import messagebox
 import psycopg2
 from decimal import Decimal, InvalidOperation
+from frontend.modular.customer_search_bar import CustomerSearchBar
+from frontend.modular.customer_table import CustomerTable
+
 
 class CustomersView(ctk.CTkFrame):
     def __init__(self, parent, controller, db_config):
         super().__init__(parent, fg_color="#f8f9fa")
         self.controller = controller
         self.db_config = db_config
+        self.base_rows = []
+        self.active_filter = "all"
+        self.filter_buttons = {}
+        self._right_panel_visible = True  # track panel state for toggle button sync
 
-        # Layout: 2 columns (table | right panels)
-        # Start with right column collapsed so table fills screen
-        self.grid_columnconfigure(0, weight=1)
-        self.grid_columnconfigure(1, weight=0)
-        self.grid_rowconfigure(0, weight=1)
+        # Layout: 2 columns (table | right cards), top row for compact actions
+        self.grid_columnconfigure(0, weight=3)
+        self.grid_columnconfigure(1, weight=2)
+        self.grid_rowconfigure(0, weight=0)  # search bar row
+        self.grid_rowconfigure(1, weight=0)  # small filter chips row
+        self.grid_rowconfigure(2, weight=1)  # main table row
 
         # -----------------------
         # SEARCH BAR (top left)
         # -----------------------
-        search_frame = ctk.CTkFrame(self, fg_color="transparent")
-        search_frame.grid(row=0, column=0, sticky="new", padx=20, pady=(20, 6))
-        search_frame.grid_columnconfigure(0, weight=1)
-
         self.search_var = ctk.StringVar()
-        self.search_entry = ctk.CTkEntry(
-            search_frame,
-            placeholder_text="Search by ID, Company, or Contact",
-            textvariable=self.search_var
-        )
-        self.search_entry.grid(row=0, column=0, sticky="ew", padx=(0, 8))
-        self.search_entry.bind("<Return>", lambda e: self.search_customers())
+        # Top row: search bar, filter chips (or filter button), and action icons
+        self.top_row = ctk.CTkFrame(self, fg_color="transparent")
+        self.top_row.grid(row=0, column=0, sticky="ew", padx=20, pady=(12, 8))
+        self.top_row.grid_columnconfigure(0, weight=1)
 
-        search_btn = ctk.CTkButton(search_frame, text="Search", width=90, command=self.search_customers)
-        search_btn.grid(row=0, column=1, padx=(0, 6))
-
-        clear_btn = ctk.CTkButton(
-            search_frame,
-            text="Clear",
-            width=90,
-            fg_color="#bdc3c7",
-            hover_color="#95a5a6",
-            command=self.clear_search
+        self.search_bar = CustomerSearchBar(
+            self.top_row,
+            search_var=self.search_var,
+            on_search=self.search_customers,
+            on_clear=self.clear_search,
+            on_toggle_panels=self.toggle_side_panels,
+            on_refresh=self.load_customers,
+            on_edit=self.edit_customer,
         )
-        clear_btn.grid(row=0, column=2)
+        self.search_bar.pack(side="left", fill="x", expand=True)
+
+        # Container for chips or the compact filter button (placed under search)
+        self.chips_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.chips_frame.grid(row=1, column=0, sticky="w", padx=24, pady=(4, 6))
+        self.filter_popup = None
+        self.filter_button = None
+        self._build_filter_chips()
 
         # --- LEFT: Customer Table (below search bar) ---
-        self.table_frame = ctk.CTkFrame(self, fg_color="#ffffff",
-                                        corner_radius=12, border_width=1,
-                                        border_color="#e0e0e0")
-        # leave space for search bar by adding top padding
-        self.table_frame.grid(row=0, column=0, sticky="nsew", padx=20, pady=(60, 20))
-
-        style = ttk.Style()
-        style.configure("Treeview.Heading", font=("Segoe UI", 12, "bold"))
-
-        self.tree = ttk.Treeview(self.table_frame, columns=(
-            "ID", "Company", "Contact", "Phone", "Address", "Balance", "Active", "Tier"
-        ), show="headings", height=20)
-
-        # Headings + alignment
-        self.tree.heading("ID", text="ID")
-        self.tree.column("ID", width=60, anchor="center")
-
-        self.tree.heading("Company", text="Company")
-        self.tree.column("Company", width=220, anchor="w")
-
-        self.tree.heading("Contact", text="Contact")
-        self.tree.column("Contact", width=160, anchor="w")
-
-        self.tree.heading("Phone", text="Phone")
-        self.tree.column("Phone", width=130, anchor="w")
-
-        self.tree.heading("Address", text="Address")
-        self.tree.column("Address", width=300, anchor="w")
-
-        self.tree.heading("Balance", text="Balance")
-        self.tree.column("Balance", width=110, anchor="center")
-
-        self.tree.heading("Active", text="Active")
-        self.tree.column("Active", width=80, anchor="center")
-
-        self.tree.heading("Tier", text="Tier")
-        self.tree.column("Tier", width=100, anchor="w")
-
-        # Pack tree with scrollbar
-        vsb = ttk.Scrollbar(self.table_frame, orient="vertical", command=self.tree.yview)
-        self.tree.configure(yscrollcommand=vsb.set)
-        vsb.pack(side="right", fill="y")
-        self.tree.pack(fill="both", expand=True, padx=10, pady=10)
+        self.table_frame = CustomerTable(self)
+        self.table_frame.grid(row=2, column=0, sticky="nsew", padx=20, pady=(0, 20))
+        self.tree = self.table_frame.tree
 
         # Bind double-click to edit
         self.tree.bind("<Double-1>", self._on_row_double_click)
+        self.tree.bind("<Button-3>", self._show_row_menu)
+
+        self.row_menu = tk.Menu(self, tearoff=0)
+        self.row_menu.add_command(label="Edit Customer", command=self.edit_customer)
+        self.row_menu.add_command(
+            label="Receive Payment", command=self.receive_payment_for_selected
+        )
+        self.row_menu.add_command(
+            label="View Payment Ledger", command=self.view_ledger_for_selected
+        )
 
         # --- RIGHT: container for Add Customer (top) and Payment (bottom) ---
-        self.right_frame = ctk.CTkFrame(self, fg_color="#ffffff",
-                                        corner_radius=12, border_width=1,
-                                        border_color="#e0e0e0")
-        self.right_frame.grid(row=0, column=1, sticky="nsew", padx=20, pady=20)
-        self.right_frame.grid_remove()  # hidden by default
+        self.right_frame = ctk.CTkFrame(
+            self,
+            fg_color="transparent",
+            corner_radius=12,
+            border_width=0,
+        )
+        self.right_frame.grid(
+            row=2, column=1, sticky="nsew", padx=(0, 20), pady=(0, 20)
+        )
+
+        # Sync the search bar toggle button with the right panel's initial visibility
+        # Panel is visible at init (we just grid'd it), so set to True
+        try:
+            self.search_bar.set_toggle_state(True)
+        except Exception:
+            pass
 
         # Make right_frame use vertical stacking
         self.right_frame.grid_rowconfigure(0, weight=0)  # add panel
-        self.right_frame.grid_rowconfigure(1, weight=1)  # payment panel
+        self.right_frame.grid_rowconfigure(1, weight=0)  # payment panel
+        self.right_frame.grid_rowconfigure(2, weight=1)
         self.right_frame.grid_columnconfigure(0, weight=1)
 
         # --- Add Customer Panel (top of right_frame) ---
-        self.add_frame = ctk.CTkFrame(self.right_frame, fg_color="#f9f9f9",
-                                      corner_radius=8, border_width=1,
-                                      border_color="#d0d0d0")
-        self.add_frame.grid(row=0, column=0, sticky="ew", padx=12, pady=(12, 6))
-        self.add_frame.grid_remove()  # hidden initially
+        self.add_shadow = ctk.CTkFrame(
+            self.right_frame,
+            fg_color="#dfe5ec",
+            corner_radius=8,
+            border_width=0,
+        )
+        self.add_shadow.grid(row=0, column=0, sticky="ew", padx=12, pady=(10, 6))
 
-        ctk.CTkLabel(self.add_frame, text="Add Customer",
-                     font=("Segoe UI", 14, "bold")).pack(pady=(8, 6))
+        self.add_frame = ctk.CTkFrame(
+            self.add_shadow,
+            fg_color="#ffffff",
+            corner_radius=8,
+            border_width=1,
+            border_color="#e5e7eb",
+        )
+        self.add_frame.pack(fill="both", expand=True, padx=1, pady=1)
 
-        self.company_entry = ctk.CTkEntry(self.add_frame, placeholder_text="Company Name")
+        ctk.CTkLabel(
+            self.add_frame,
+            text="Add Customer",
+            font=("Segoe UI", 14, "bold"),
+            text_color="#2c3e50",  # Dark Blue-Grey
+        ).pack(pady=(12, 8))
+
+        self.company_entry = ctk.CTkEntry(
+            self.add_frame, placeholder_text="Company Name"
+        )
         self.company_entry.pack(fill="x", padx=12, pady=4)
+        self._style_input(self.company_entry)
 
-        self.contact_entry = ctk.CTkEntry(self.add_frame, placeholder_text="Contact Name")
+        self.contact_entry = ctk.CTkEntry(
+            self.add_frame, placeholder_text="Contact Name"
+        )
         self.contact_entry.pack(fill="x", padx=12, pady=4)
+        self._style_input(self.contact_entry)
 
         self.phone_entry = ctk.CTkEntry(self.add_frame, placeholder_text="Phone Number")
         self.phone_entry.pack(fill="x", padx=12, pady=4)
+        self._style_input(self.phone_entry)
 
         self.address_entry = ctk.CTkEntry(self.add_frame, placeholder_text="Address")
         self.address_entry.pack(fill="x", padx=12, pady=4)
+        self._style_input(self.address_entry)
 
-        add_btn = ctk.CTkButton(self.add_frame, text="Add Customer",
-                                fg_color="#27ae60", hover_color="#1e8449",
-                                command=self.add_customer)
+        add_btn = ctk.CTkButton(
+            self.add_frame,
+            text="Add Customer",
+            fg_color="#27ae60",
+            hover_color="#1e8449",
+            command=self.add_customer,
+        )
         add_btn.pack(pady=10)
 
         # --- Payment Panel (below add_frame) ---
-        self.payment_frame = ctk.CTkFrame(self.right_frame, fg_color="#f9f9f9",
-                                          corner_radius=8, border_width=1,
-                                          border_color="#d0d0d0")
-        self.payment_frame.grid(row=1, column=0, sticky="nsew", padx=12, pady=(6, 12))
-        self.payment_frame.grid_remove()  # hidden initially
+        self.pay_shadow = ctk.CTkFrame(
+            self.right_frame,
+            fg_color="#dfe5ec",
+            corner_radius=8,
+            border_width=0,
+        )
+        self.pay_shadow.grid(row=1, column=0, sticky="nsew", padx=12, pady=(6, 10))
 
-        ctk.CTkLabel(self.payment_frame, text="Receive Payment",
-                     font=("Segoe UI", 14, "bold")).pack(pady=(8, 6))
+        self.payment_frame = ctk.CTkFrame(
+            self.pay_shadow,
+            fg_color="#ffffff",
+            corner_radius=8,
+            border_width=1,
+            border_color="#e5e7eb",
+        )
+        self.payment_frame.pack(fill="both", expand=True, padx=1, pady=1)
+
+        ctk.CTkLabel(
+            self.payment_frame,
+            text="Receive Payment",
+            font=("Segoe UI", 14, "bold"),
+            text_color="#2c3e50",  # Dark Blue-Grey
+        ).pack(pady=(12, 8))
 
         self.customer_dropdown = ctk.CTkComboBox(self.payment_frame, values=[])
         self.customer_dropdown.pack(fill="x", padx=12, pady=6)
+        self._style_input(self.customer_dropdown)
 
-        self.amount_entry = ctk.CTkEntry(self.payment_frame, placeholder_text="Enter amount")
+        self.amount_entry = ctk.CTkEntry(
+            self.payment_frame, placeholder_text="Enter amount"
+        )
         self.amount_entry.pack(fill="x", padx=12, pady=6)
+        self._style_input(self.amount_entry)
 
-        self.method_dropdown = ctk.CTkComboBox(self.payment_frame,
-                                               values=["Cash", "Credit Card", "Bank Transfer"])
+        self.method_dropdown = ctk.CTkComboBox(
+            self.payment_frame, values=["Cash", "Credit Card", "Bank Transfer"]
+        )
         self.method_dropdown.pack(fill="x", padx=12, pady=6)
+        self._style_input(self.method_dropdown)
 
-        process_btn = ctk.CTkButton(self.payment_frame, text="Process Payment",
-                                    fg_color="#3498db", hover_color="#2980b9",
-                                    command=self.process_payment)
+        self.note_entry = ctk.CTkEntry(
+            self.payment_frame,
+            placeholder_text="Optional note / OR number",
+        )
+        self.note_entry.pack(fill="x", padx=12, pady=(0, 6))
+        self._style_input(self.note_entry)
+
+        process_btn = ctk.CTkButton(
+            self.payment_frame,
+            text="Process Payment",
+            fg_color="#3498db",
+            hover_color="#2980b9",
+            command=self.process_payment,
+        )
         process_btn.pack(fill="x", padx=12, pady=12)
-
-        # --- ACTION BUTTONS (bottom row) ---
-        btn_frame = ctk.CTkFrame(self, fg_color="transparent")
-        btn_frame.grid(row=1, column=0, columnspan=2, sticky="ew", padx=20, pady=10)
-
-        ctk.CTkButton(btn_frame, text="Refresh", fg_color="#3498db",
-                      hover_color="#2980b9", command=self.load_customers).pack(side="left", padx=6)
-        ctk.CTkButton(btn_frame, text="Toggle Add Customer", fg_color="#8e44ad",
-                      hover_color="#6c3483", command=self.toggle_add_panel).pack(side="left", padx=6)
-        ctk.CTkButton(btn_frame, text="Toggle Payment Receive", fg_color="#2b9430",
-                      hover_color="#1c7421", command=self.toggle_payment_panel).pack(side="left", padx=6)
-        ctk.CTkButton(btn_frame, text="Edit Customer", fg_color="#f39c12",
-                      hover_color="#d68910", command=self.edit_customer).pack(side="left", padx=6)
 
         # Load initial data
         self.load_customers()
+
+    def _style_input(self, widget):
+        # Build kwargs and filter unsupported options for specific widgets
+        common_kwargs = dict(
+            fg_color="#f8f9fa",
+            border_width=1,
+            border_color="#d0d7de",
+            corner_radius=8,
+            height=34,
+            text_color="#1c1c1c",
+            placeholder_text_color="#7f8c8d",
+        )
+
+        if isinstance(widget, ctk.CTkComboBox):
+            # `CTkComboBox.configure` in some customtkinter versions does not accept
+            # `placeholder_text_color` (and Pylance may flag `**safe_kwargs` expansion).
+            # Pass the supported options explicitly to keep type checkers happy.
+            widget.configure(
+                fg_color=common_kwargs["fg_color"],
+                border_width=common_kwargs["border_width"],
+                border_color=common_kwargs["border_color"],
+                corner_radius=common_kwargs["corner_radius"],
+                height=common_kwargs["height"],
+            )
+            widget.configure(button_color="#abb2b9", button_hover_color="#566573")
+        else:
+            widget.configure(**common_kwargs)
+        widget.bind(
+            "<FocusIn>", lambda _e, w=widget: w.configure(border_color="#3498db")
+        )
+        widget.bind(
+            "<FocusOut>", lambda _e, w=widget: w.configure(border_color="#d0d7de")
+        )
+
+    def _build_filter_chips(self):
+        chip_specs = [
+            ("all", "All"),
+            ("balance", "With Balance"),
+            ("inactive", "Inactive"),
+            ("gold", "Gold Tier"),
+        ]
+        # If too many chips (or in narrow layouts), use a compact Filter button
+        COMPACT_THRESHOLD = 4
+        # Clear existing
+        for child in self.chips_frame.winfo_children():
+            child.destroy()
+        self.filter_buttons.clear()
+
+        if len(chip_specs) > COMPACT_THRESHOLD:
+            # Compact: single filter button opens popup with options
+            self.filter_button = ctk.CTkButton(
+                self.chips_frame,
+                text="Filter ∇",
+                width=100,
+                height=34,
+                corner_radius=12,
+                fg_color="#ebeff5",
+                hover_color="#dde6f2",
+                text_color="#415162",
+                command=self._show_filter_popup,
+            )
+            self.filter_button.pack(side="left")
+        else:
+            self.filter_button = None
+            for key, label in chip_specs:
+                btn = ctk.CTkButton(
+                    self.chips_frame,
+                    text=label,
+                    width=86,
+                    height=26,
+                    corner_radius=13,
+                    font=("Segoe UI", 10),
+                    fg_color="#ebeff5",
+                    hover_color="#dde6f2",
+                    text_color="#415162",
+                    command=lambda k=key: self.set_active_filter(k),
+                )
+                btn.pack(side="left", padx=(0, 6))
+                self.filter_buttons[key] = btn
+
+        self._refresh_filter_chip_styles()
+
+    def _show_filter_popup(self):
+        # Reuse existing popup if open
+        if (
+            self.filter_popup is not None
+            and getattr(self.filter_popup, "winfo_exists", lambda: False)()
+        ):
+            try:
+                self.filter_popup.lift()
+            except Exception:
+                pass
+            return
+
+        self.filter_popup = ctk.CTkToplevel(self)
+        self.filter_popup.overrideredirect(True)
+        # Position the popup near the filter button (fallback to chips_frame)
+        fb = getattr(self, "filter_button", None)
+        if fb is not None:
+            bx = fb.winfo_rootx()
+            by = fb.winfo_rooty() + fb.winfo_height()
+        else:
+            cf = getattr(self, "chips_frame", None)
+            if cf is not None:
+                bx = cf.winfo_rootx()
+                by = cf.winfo_rooty() + cf.winfo_height()
+            else:
+                # Last resort: position near the parent frame
+                bx = self.winfo_rootx()
+                by = self.winfo_rooty() + self.winfo_height()
+        self.filter_popup.geometry(f"220x160+{bx}+{by}")
+        self.filter_popup.transient(self.winfo_toplevel())
+
+        inner = ctk.CTkFrame(
+            self.filter_popup,
+            fg_color="#ffffff",
+            corner_radius=8,
+            border_width=1,
+            border_color="#e5e7eb",
+        )
+        inner.pack(fill="both", expand=True, padx=8, pady=8)
+
+        chip_specs = [
+            ("all", "All"),
+            ("balance", "With Balance"),
+            ("inactive", "Inactive"),
+            ("gold", "Gold Tier"),
+        ]
+
+        def _make_select_handler(k):
+            def _handler():
+                if self.filter_popup is not None:
+                    try:
+                        if getattr(self.filter_popup, "winfo_exists", lambda: False)():
+                            self.filter_popup.destroy()
+                    except Exception:
+                        pass
+                self.set_active_filter(k)
+
+            return _handler
+
+        for key, label in chip_specs:
+            b = ctk.CTkButton(
+                inner,
+                text=label,
+                width=180,
+                height=34,
+                command=_make_select_handler(key),
+            )
+            b.pack(pady=6)
+
+    def set_active_filter(self, filter_key):
+        self.active_filter = filter_key
+        self._refresh_filter_chip_styles()
+        self._render_rows()
+
+    def _refresh_filter_chip_styles(self):
+        for key, btn in self.filter_buttons.items():
+            if key == self.active_filter:
+                btn.configure(
+                    fg_color="#d8e9fb",
+                    hover_color="#c8dff7",
+                    text_color="#1f5f9f",
+                )
+            else:
+                btn.configure(
+                    fg_color="#ebeff5",
+                    hover_color="#dde6f2",
+                    text_color="#415162",
+                )
+
+        # If using the compact filter button, indicate active state by color
+        fb = getattr(self, "filter_button", None)
+        if fb is not None:
+            if self.active_filter == "all":
+                fb.configure(
+                    fg_color="#ebeff5", hover_color="#dde6f2", text_color="#415162"
+                )
+            else:
+                fb.configure(
+                    fg_color="#d8e9fb", hover_color="#c8dff7", text_color="#1f5f9f"
+                )
+
+    def toggle_side_panels(self):
+        # Toggle based on our tracked state, not winfo_viewable() which may be stale
+        if self._right_panel_visible:
+            self.right_frame.grid_remove()
+            self.grid_columnconfigure(0, weight=1)
+            self.grid_columnconfigure(1, weight=0)
+            self._right_panel_visible = False
+        else:
+            # Re-grid the right panel with the same layout options to ensure proper placement
+            self.right_frame.grid(
+                row=2, column=1, sticky="nsew", padx=(0, 20), pady=(0, 20)
+            )
+            self.grid_columnconfigure(0, weight=3)
+            self.grid_columnconfigure(1, weight=2)
+            self._right_panel_visible = True
+        # Keep the search bar toggle in sync with our tracked state
+        try:
+            self.search_bar.set_toggle_state(self._right_panel_visible)
+        except Exception:
+            pass
+
+    def _show_row_menu(self, event):
+        item = self.tree.identify_row(event.y)
+        if not item:
+            return
+        self.tree.selection_set(item)
+        self.tree.focus(item)
+        try:
+            self.row_menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            self.row_menu.grab_release()
+
+    def _selected_customer(self):
+        selected = self.tree.selection()
+        if not selected:
+            return None, None
+        values = self.tree.item(selected[0]).get("values", [])
+        if not values:
+            return None, None
+        try:
+            cust_id = int(values[0])
+        except Exception:
+            cust_id = None
+        company = values[1] if len(values) > 1 else ""
+        return cust_id, company
+
+    def receive_payment_for_selected(self):
+        cust_id, company = self._selected_customer()
+        if cust_id is None:
+            messagebox.showwarning("Selection", "No customer selected.")
+            return
+
+        if not self.right_frame.winfo_viewable():
+            self.toggle_side_panels()
+
+        target = f"{cust_id} - {company}"
+        options = self.customer_dropdown.cget("values")
+        if target in options:
+            self.customer_dropdown.set(target)
+        else:
+            for option in options:
+                if str(option).startswith(f"{cust_id} -"):
+                    self.customer_dropdown.set(option)
+                    break
+
+        self.amount_entry.focus_set()
+
+    def view_ledger_for_selected(self):
+        cust_id, company = self._selected_customer()
+        if cust_id is None:
+            messagebox.showwarning("Selection", "No customer selected.")
+            return
+        self._open_ledger_popup(cust_id, company)
 
     # -------------------------
     # Database / UI operations
@@ -178,9 +469,99 @@ class CustomersView(ctk.CTkFrame):
     def _connect(self):
         return psycopg2.connect(**self.db_config)
 
+    def _apply_filter(self, rows):
+        if self.active_filter == "all":
+            return list(rows)
+
+        filtered = []
+        for row in rows:
+            _, _, _, _, _, balance, is_active, tier = row
+            amount = (
+                float(balance) if isinstance(balance, (int, float, Decimal)) else 0.0
+            )
+            tier_text = str(tier or "").lower()
+
+            if self.active_filter == "balance" and amount > 0:
+                filtered.append(row)
+            elif self.active_filter == "inactive" and not bool(is_active):
+                filtered.append(row)
+            elif self.active_filter == "gold" and "gold" in tier_text:
+                filtered.append(row)
+
+        return filtered
+
+    def _render_rows(self):
+        rows_to_render = self._apply_filter(self.base_rows)
+
+        self.table_frame.clear()
+
+        if not self.base_rows:
+            self.table_frame.show_empty_state(
+                "No customers found",
+                "Try adding a customer or clearing your search.",
+            )
+            self._populate_customer_dropdown([])
+            return
+
+        if not rows_to_render:
+            self.table_frame.show_empty_state(
+                "No matches for this filter",
+                "Switch filter chips or clear search to see more customers.",
+            )
+            self._populate_customer_dropdown([])
+            return
+
+        self.table_frame.hide_empty_state()
+
+        for row in rows_to_render:
+            cust_no, company, contact, phone, address, balance, is_active, tier = row
+            balance_str = (
+                f"₱{balance:,.2f}"
+                if isinstance(balance, (int, float, Decimal))
+                else str(balance)
+            )
+            active_str = "● Active" if is_active else "○ Inactive"
+            tier_text = str(tier or "")
+            tier_lower = tier_text.lower()
+            if "gold" in tier_lower:
+                tier_str = "★ Gold"
+            elif "silver" in tier_lower:
+                tier_str = "◈ Silver"
+            elif "bronze" in tier_lower:
+                tier_str = "◆ Bronze"
+            else:
+                tier_str = tier_text
+
+            debt_value = 0.0
+            if isinstance(balance, (int, float, Decimal)):
+                debt_value = float(balance)
+
+            self.table_frame.insert_row(
+                values=(
+                    cust_no,
+                    company,
+                    contact,
+                    phone,
+                    address,
+                    balance_str,
+                    active_str,
+                    tier_str,
+                ),
+                balance=debt_value,
+            )
+
+        self._populate_customer_dropdown(rows_to_render)
+
+    def _populate_customer_dropdown(self, rows):
+        dropdown_values = ["Select customer..."]
+        for r in rows:
+            dropdown_values.append(f"{r[0]} - {r[1]}")
+        self.customer_dropdown.configure(values=dropdown_values)
+        self.customer_dropdown.set(dropdown_values[0])
+
     def load_customers(self, rows=None):
         """Load rows from customer_list_view and populate tree and dropdown.
-           If rows is provided, use it (used by search)."""
+        If rows is provided, use it (used by search)."""
         if rows is None:
             try:
                 conn = self._connect()
@@ -197,24 +578,8 @@ class CustomersView(ctk.CTkFrame):
                 print("Error loading customers:", e)
                 rows = []
 
-        # Clear tree
-        for item in self.tree.get_children():
-            self.tree.delete(item)
-
-        # Insert rows
-        for row in rows:
-            cust_no, company, contact, phone, address, balance, is_active, tier = row
-            balance_str = f"₱{balance:,.2f}" if isinstance(balance, (int, float, Decimal)) else str(balance)
-            active_str = "Yes" if is_active else "No"
-            self.tree.insert("", "end", values=(cust_no, company, contact, phone, address, balance_str, active_str, tier))
-
-        # Populate customer dropdown (id - company)
-        dropdown_values = ["Select customer..."]
-        for r in rows:
-            dropdown_values.append(f"{r[0]} - {r[1]}")
-        self.customer_dropdown.configure(values=dropdown_values)
-        if len(dropdown_values) > 0:
-            self.customer_dropdown.set(dropdown_values[0])
+        self.base_rows = rows
+        self._render_rows()
 
     # -------------------------
     # Search
@@ -236,22 +601,28 @@ class CustomersView(ctk.CTkFrame):
             conn = self._connect()
             cur = conn.cursor()
             if cust_id is not None:
-                cur.execute("""
+                cur.execute(
+                    """
                     SELECT customer_number, company_name, contact_name, phone_number,
                            address, current_balance, is_active, balance_tier
                     FROM customer_list_view
                     WHERE customer_number = %s
                     ORDER BY company_name;
-                """, (cust_id,))
+                """,
+                    (cust_id,),
+                )
             else:
                 like_term = f"%{term}%"
-                cur.execute("""
+                cur.execute(
+                    """
                     SELECT customer_number, company_name, contact_name, phone_number,
                            address, current_balance, is_active, balance_tier
                     FROM customer_list_view
                     WHERE company_name ILIKE %s OR contact_name ILIKE %s
                     ORDER BY company_name;
-                """, (like_term, like_term))
+                """,
+                    (like_term, like_term),
+                )
             rows = cur.fetchall()
             cur.close()
             conn.close()
@@ -261,90 +632,27 @@ class CustomersView(ctk.CTkFrame):
             rows = []
             for item in self.tree.get_children():
                 vals = self.tree.item(item)["values"]
-                if any(term.lower() in str(v).lower() for v in (vals[0], vals[1], vals[2])):
-                    rows.append((vals[0], vals[1], vals[2], vals[3], vals[4], vals[5], vals[6], vals[7]))
+                if any(
+                    term.lower() in str(v).lower() for v in (vals[0], vals[1], vals[2])
+                ):
+                    rows.append(
+                        (
+                            vals[0],
+                            vals[1],
+                            vals[2],
+                            vals[3],
+                            vals[4],
+                            vals[5],
+                            vals[6],
+                            vals[7],
+                        )
+                    )
 
         self.load_customers(rows=rows)
 
     def clear_search(self):
         self.search_var.set("")
         self.load_customers()
-
-    # -------------------------
-    # Panels toggles and helpers
-    # -------------------------
-    def _ensure_right_visible(self):
-        """Ensure right_frame is visible and column weights set for two-column layout."""
-        if not self.right_frame.winfo_viewable():
-            self.right_frame.grid()
-        self.grid_columnconfigure(0, weight=3)
-        self.grid_columnconfigure(1, weight=2)
-
-    def _maybe_hide_right(self):
-        """Hide right_frame entirely if both panels are hidden; otherwise ensure visible."""
-        add_visible = self.add_frame.winfo_viewable()
-        pay_visible = self.payment_frame.winfo_viewable()
-        if not add_visible and not pay_visible:
-            # hide whole right frame and let table fill
-            if self.right_frame.winfo_viewable():
-                self.right_frame.grid_remove()
-            self.grid_columnconfigure(0, weight=1)
-            self.grid_columnconfigure(1, weight=0)
-        else:
-            # ensure right frame visible and set weights
-            self._ensure_right_visible()
-
-    def toggle_add_panel(self):
-        """
-        Toggle only the Add Customer panel.
-        Behavior:
-          - If right_frame hidden, show right_frame and show only add panel.
-          - If add panel visible, hide it (and possibly hide right_frame if payment also hidden).
-          - If add panel hidden and payment visible, show add panel above payment.
-        """
-        if not self.right_frame.winfo_viewable():
-            # show right frame and show only add panel
-            self.right_frame.grid()
-            self.add_frame.grid()
-            self.payment_frame.grid_remove()
-            self.grid_columnconfigure(0, weight=3)
-            self.grid_columnconfigure(1, weight=2)
-            return
-
-        if self.add_frame.winfo_viewable():
-            # hide add panel
-            self.add_frame.grid_remove()
-            self._maybe_hide_right()
-        else:
-            # show add panel; keep payment panel as-is (if payment visible, add will be on top)
-            self.add_frame.grid()
-            self._ensure_right_visible()
-
-    def toggle_payment_panel(self):
-        """
-        Toggle only the Payment panel.
-        Behavior:
-          - If right_frame hidden, show right_frame and show only payment panel.
-          - If payment panel visible, hide it (and possibly hide right_frame if add also hidden).
-          - If payment panel hidden and add visible, show payment panel below add.
-        """
-        if not self.right_frame.winfo_viewable():
-            # show right frame and show only payment panel
-            self.right_frame.grid()
-            self.payment_frame.grid()
-            self.add_frame.grid_remove()
-            self.grid_columnconfigure(0, weight=3)
-            self.grid_columnconfigure(1, weight=2)
-            return
-
-        if self.payment_frame.winfo_viewable():
-            # hide payment panel
-            self.payment_frame.grid_remove()
-            self._maybe_hide_right()
-        else:
-            # show payment panel; keep add panel as-is (if add visible, payment will be below)
-            self.payment_frame.grid()
-            self._ensure_right_visible()
 
     def add_customer(self):
         """Insert a new customer into customers table and refresh."""
@@ -360,12 +668,16 @@ class CustomersView(ctk.CTkFrame):
         try:
             conn = self._connect()
             cur = conn.cursor()
-            cur.execute("""
+            cur.execute(
+                """
                 INSERT INTO customers (company_name, contact_name, phone_number, address)
                 VALUES (%s, %s, %s, %s)
                 RETURNING customer_number;
-            """, (company, contact, phone, address))
-            new_id = cur.fetchone()[0]
+            """,
+                (company, contact, phone, address),
+            )
+            result = cur.fetchone()
+            new_id = result[0] if result else None
             conn.commit()
             cur.close()
             conn.close()
@@ -384,7 +696,9 @@ class CustomersView(ctk.CTkFrame):
         """Apply payment: subtract amount from current_balance for selected customer."""
         sel = self.customer_dropdown.get()
         if not sel or sel == "Select customer...":
-            messagebox.showwarning("Validation", "Please select a customer from the dropdown.")
+            messagebox.showwarning(
+                "Validation", "Please select a customer from the dropdown."
+            )
             return
 
         try:
@@ -412,28 +726,146 @@ class CustomersView(ctk.CTkFrame):
             messagebox.showwarning("Validation", "Select a payment method.")
             return
 
+        note = self.note_entry.get().strip()
+
         try:
             conn = self._connect()
             cur = conn.cursor()
-            cur.execute("""
+            cur.execute(
+                """
                 UPDATE customers
                 SET current_balance = current_balance - %s
                 WHERE customer_number = %s
                 RETURNING current_balance;
-            """, (amount, cust_id))
+            """,
+                (amount, cust_id),
+            )
             result = cur.fetchone()
             if result is None:
                 raise Exception("Customer not found.")
             new_balance = result[0]
+
+            self._record_payment_audit(
+                cur=cur,
+                cust_id=cust_id,
+                amount=amount,
+                method=method,
+                note=note,
+                balance_after=new_balance,
+            )
+
             conn.commit()
             cur.close()
             conn.close()
-            messagebox.showinfo("Payment Processed", f"Payment of {amount:,.2f} applied. New balance: ₱{new_balance:,.2f}")
+            messagebox.showinfo(
+                "Payment Processed",
+                f"Payment of {amount:,.2f} applied. New balance: ₱{new_balance:,.2f}",
+            )
             self.amount_entry.delete(0, "end")
+            self.note_entry.delete(0, "end")
             self.load_customers()
         except Exception as e:
             print("Error processing payment:", e)
             messagebox.showerror("Error", f"Could not process payment: {e}")
+
+    def _record_payment_audit(self, cur, cust_id, amount, method, note, balance_after):
+        try:
+            cur.execute("SAVEPOINT payment_audit_savepoint;")
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS customer_payments (
+                    payment_id SERIAL PRIMARY KEY,
+                    customer_number INTEGER NOT NULL REFERENCES customers(customer_number) ON DELETE CASCADE,
+                    payment_amount NUMERIC(12, 2) NOT NULL CHECK (payment_amount > 0),
+                    payment_method VARCHAR(50) NOT NULL,
+                    payment_note TEXT,
+                    balance_after NUMERIC(12, 2),
+                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+            cur.execute(
+                """
+                INSERT INTO customer_payments (
+                    customer_number,
+                    payment_amount,
+                    payment_method,
+                    payment_note,
+                    balance_after
+                )
+                VALUES (%s, %s, %s, %s, %s);
+            """,
+                (cust_id, amount, method, note or None, balance_after),
+            )
+        except Exception as audit_error:
+            print("Warning: payment audit logging failed:", audit_error)
+            cur.execute("ROLLBACK TO SAVEPOINT payment_audit_savepoint;")
+
+    def _open_ledger_popup(self, cust_id, company):
+        lines = []
+        try:
+            conn = self._connect()
+            cur = conn.cursor()
+            cur.execute("SELECT to_regclass('public.customer_payments');")
+            table_name = cur.fetchone()
+
+            if not table_name or table_name[0] is None:
+                lines.append(
+                    "No payment ledger yet. Process a payment to create ledger records."
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT created_at, payment_amount, payment_method, COALESCE(payment_note, ''), balance_after
+                    FROM customer_payments
+                    WHERE customer_number = %s
+                    ORDER BY created_at DESC
+                    LIMIT 100;
+                """,
+                    (cust_id,),
+                )
+                rows = cur.fetchall()
+                if not rows:
+                    lines.append("No payment records for this customer yet.")
+                else:
+                    for (
+                        created_at,
+                        payment_amount,
+                        payment_method,
+                        payment_note,
+                        balance_after,
+                    ) in rows:
+                        lines.append(
+                            f"{created_at:%Y-%m-%d %H:%M} | -₱{payment_amount:,.2f} | {payment_method} | Bal: ₱{balance_after:,.2f}"
+                        )
+                        if payment_note:
+                            lines.append(f"  Note: {payment_note}")
+
+            cur.close()
+            conn.close()
+        except Exception as e:
+            lines = [f"Could not load payment ledger: {e}"]
+
+        popup = ctk.CTkToplevel(self)
+        popup.title(f"Payment Ledger - {cust_id} {company}")
+        popup.geometry("700x420")
+        popup.transient(self.winfo_toplevel())
+        popup.grab_set()
+
+        ctk.CTkLabel(
+            popup,
+            text=f"Payment Ledger: {company} (ID {cust_id})",
+            font=("Segoe UI", 16, "bold"),
+            text_color="#2c3e50",
+        ).pack(anchor="w", padx=14, pady=(12, 8))
+
+        ledger_box = ctk.CTkTextbox(
+            popup,
+            fg_color="#f8f9fa",
+            border_width=1,
+            border_color="#d0d7de",
+        )
+        ledger_box.pack(fill="both", expand=True, padx=14, pady=(0, 12))
+        ledger_box.insert("1.0", "\n".join(lines))
+        ledger_box.configure(state="disabled")
 
     # -------------------------
     # Edit customer workflow
@@ -460,11 +892,14 @@ class CustomersView(ctk.CTkFrame):
         try:
             conn = self._connect()
             cur = conn.cursor()
-            cur.execute("""
+            cur.execute(
+                """
                 SELECT customer_number, company_name, contact_name, phone_number, address, current_balance, is_active
                 FROM customers
                 WHERE customer_number = %s;
-            """, (cust_id,))
+            """,
+                (cust_id,),
+            )
             row = cur.fetchone()
             cur.close()
             conn.close()
@@ -479,38 +914,50 @@ class CustomersView(ctk.CTkFrame):
         popup = ctk.CTkToplevel(self)
         popup.title(f"Edit Customer {cust_id}")
         popup.geometry("480x420")
-        popup.transient(self)
+        popup.transient(self.winfo_toplevel())
         popup.grab_set()
 
         _, company, contact, phone, address, balance, is_active = row
 
-        ctk.CTkLabel(popup, text="Company", anchor="w").pack(fill="x", padx=12, pady=(12,4))
+        ctk.CTkLabel(popup, text="Company", anchor="w").pack(
+            fill="x", padx=12, pady=(12, 4)
+        )
         company_e = ctk.CTkEntry(popup)
         company_e.pack(fill="x", padx=12, pady=4)
         company_e.insert(0, company or "")
 
-        ctk.CTkLabel(popup, text="Contact", anchor="w").pack(fill="x", padx=12, pady=(8,4))
+        ctk.CTkLabel(popup, text="Contact", anchor="w").pack(
+            fill="x", padx=12, pady=(8, 4)
+        )
         contact_e = ctk.CTkEntry(popup)
         contact_e.pack(fill="x", padx=12, pady=4)
         contact_e.insert(0, contact or "")
 
-        ctk.CTkLabel(popup, text="Phone", anchor="w").pack(fill="x", padx=12, pady=(8,4))
+        ctk.CTkLabel(popup, text="Phone", anchor="w").pack(
+            fill="x", padx=12, pady=(8, 4)
+        )
         phone_e = ctk.CTkEntry(popup)
         phone_e.pack(fill="x", padx=12, pady=4)
         phone_e.insert(0, phone or "")
 
-        ctk.CTkLabel(popup, text="Address", anchor="w").pack(fill="x", padx=12, pady=(8,4))
+        ctk.CTkLabel(popup, text="Address", anchor="w").pack(
+            fill="x", padx=12, pady=(8, 4)
+        )
         address_e = ctk.CTkEntry(popup)
         address_e.pack(fill="x", padx=12, pady=4)
         address_e.insert(0, address or "")
 
-        ctk.CTkLabel(popup, text="Current Balance", anchor="w").pack(fill="x", padx=12, pady=(8,4))
+        ctk.CTkLabel(popup, text="Current Balance", anchor="w").pack(
+            fill="x", padx=12, pady=(8, 4)
+        )
         balance_e = ctk.CTkEntry(popup)
         balance_e.pack(fill="x", padx=12, pady=4)
         balance_e.insert(0, str(balance))
 
         active_var = ctk.StringVar(value="Yes" if is_active else "No")
-        ctk.CTkLabel(popup, text="Active", anchor="w").pack(fill="x", padx=12, pady=(8,4))
+        ctk.CTkLabel(popup, text="Active", anchor="w").pack(
+            fill="x", padx=12, pady=(8, 4)
+        )
         active_cb = ctk.CTkComboBox(popup, values=["Yes", "No"], variable=active_var)
         active_cb.pack(fill="x", padx=12, pady=4)
 
@@ -523,7 +970,9 @@ class CustomersView(ctk.CTkFrame):
             new_active = True if active_var.get() == "Yes" else False
 
             if not new_company or not new_address:
-                messagebox.showwarning("Validation", "Company and Address are required.")
+                messagebox.showwarning(
+                    "Validation", "Company and Address are required."
+                )
                 return
 
             try:
@@ -536,7 +985,8 @@ class CustomersView(ctk.CTkFrame):
             try:
                 conn = self._connect()
                 cur = conn.cursor()
-                cur.execute("""
+                cur.execute(
+                    """
                     UPDATE customers
                     SET company_name = %s,
                         contact_name = %s,
@@ -545,7 +995,17 @@ class CustomersView(ctk.CTkFrame):
                         current_balance = %s,
                         is_active = %s
                     WHERE customer_number = %s;
-                """, (new_company, new_contact, new_phone, new_address, new_balance, new_active, cust_id))
+                """,
+                    (
+                        new_company,
+                        new_contact,
+                        new_phone,
+                        new_address,
+                        new_balance,
+                        new_active,
+                        cust_id,
+                    ),
+                )
                 conn.commit()
                 cur.close()
                 conn.close()
@@ -556,9 +1016,16 @@ class CustomersView(ctk.CTkFrame):
                 print("Error saving customer:", e)
                 messagebox.showerror("Error", f"Could not save changes: {e}")
 
-        save_btn = ctk.CTkButton(popup, text="Save Changes", fg_color="#3498db", command=save_changes)
+        save_btn = ctk.CTkButton(
+            popup, text="Save Changes", fg_color="#3498db", command=save_changes
+        )
         save_btn.pack(pady=12, padx=12, fill="x")
 
-        cancel_btn = ctk.CTkButton(popup, text="Cancel", fg_color="#bdc3c7",
-                                   hover_color="#95a5a6", command=popup.destroy)
-        cancel_btn.pack(padx=12, pady=(0,12), fill="x")
+        cancel_btn = ctk.CTkButton(
+            popup,
+            text="Cancel",
+            fg_color="#bdc3c7",
+            hover_color="#95a5a6",
+            command=popup.destroy,
+        )
+        cancel_btn.pack(padx=12, pady=(0, 12), fill="x")
