@@ -4,13 +4,44 @@ Use this file as your live implementation checklist.
 
 ## Overall Progress
 
-- [ ] Milestone 1: Database schema updates complete
-- [ ] Milestone 2: Backend logic complete
-- [ ] Milestone 3: Frontend tab integration complete
-- [ ] Milestone 4: Testing and validation complete
+- [ ] Phase 1: Foundation and Data Layer complete
+- [ ] Phase 2: Core Workflows and UI Integration complete
+- [ ] Phase 3: Validation, Hardening, and Delivery complete
 
 Completed Requirements: `0 / 17`  
-Last Updated: `YYYY-MM-DD`
+Last Updated: `2026-05-09`
+
+Current Code Snapshot:
+
+- Reports are now routed through `ReportsHubView` under `frontend/tabs/reports_tab/`.
+- Implemented reports: Inventory Report, Weekly Sales Report, Stock Ordering Report.
+- Placeholder reports (still pending): Customer List & Balances, Customer Payment History.
+- `orders_and_invoices.py` exists but is currently empty.
+
+---
+
+## 3-Phase Breakdown
+
+### Phase 1: Foundation and Data Layer
+
+- [ ] Finalize database schema and constraints (`Customers`, `Invoices`, `Parts`, `Employees`, `Timecards`, `Payments`, `Part_Suppliers`, `Logs`)
+- [ ] Implement base backend services for reusable DB access (replace view-only query ownership)
+- [ ] Complete FS-Sec1 and FS-Sec2 foundations (RBAC guards + automated identifiers)
+- [ ] Stabilize customer, inventory, and report modules against the finalized schema
+
+### Phase 2: Core Workflows and UI Integration
+
+- [ ] Complete Orders and Invoices workflow (`orders_and_invoices.py`)
+- [ ] Implement payroll and timecard workflows (Requirements 6, 7, 8, 9)
+- [ ] Complete remaining report views and exports (customer balances, payment history, payroll report)
+- [ ] Enforce business-rule workflows end-to-end (shipping, stock decrement, backlog, supplier costing)
+
+### Phase 3: Validation, Hardening, and Delivery
+
+- [ ] Implement full testing coverage (unit, integration, workflow validation)
+- [ ] Complete safety nets (audit logging, weekly trigger resilience, uniqueness constraints)
+- [ ] Add controller-layer authorization and transaction guards across all writes
+- [ ] Prepare final verification package (checklist evidence, screenshots, and demo-ready flows)
 
 ---
 
@@ -152,7 +183,7 @@ Last Updated: `YYYY-MM-DD`
 
 - [ ] Implement SQL `GROUP BY` sales query per sales rep
 - [ ] Expose query in backend reports service
-- [ ] Show Rep Performance section in Reports tab
+- [x] Show Rep Performance section in Reports tab
 - [ ] Add test for rep totals
 
 ### 5. Stock vs. On Order
@@ -273,7 +304,6 @@ Last Updated: `YYYY-MM-DD`
 - [ ] Use dropdown/combobox components for existing customer/supplier selection
 - [ ] Add modification workflow for transactional records
 - [ ] Restrict price-edit controls in Inventory tab to Manager role only
-- [ ] Restrict price-edit controls in Inventory tab to Manager role only
 - [x] Enable customer profile modification (FS-Sec5): company name, address, contact info
 - [ ] Add UI and backend tests for form validation and submission
 
@@ -286,10 +316,10 @@ Last Updated: `YYYY-MM-DD`
 
 ### FS-Sec7: Report Generation Views
 
-- [ ] Create Inventory Report view (parts, stock counts, costs)
-- [ ] Create Weekly Sales report (last 7 days invoice total)
+- [x] Create Inventory Report view (parts, stock counts, costs)
+- [x] Create Weekly Sales report (last 7 days invoice total)
 - [ ] Create Sales Rep Payroll report (commission calculation: `Sales * 0.05`)
-- [ ] Create Stock Ordering report (`stock <= trigger`)
+- [x] Create Stock Ordering report (`stock <= trigger`)
 - [ ] Create searchable Customer List report (profiles and balances)
 - [ ] Add export option for each report (CSV/JSON)
 
