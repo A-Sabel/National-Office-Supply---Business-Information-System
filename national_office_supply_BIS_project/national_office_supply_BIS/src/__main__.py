@@ -5,6 +5,8 @@ from frontend.modular.navigation_bar import NavigationSidebar
 from frontend.modular.top_bar import TopBar
 from frontend.tabs.dashboard import DashboardView
 from frontend.tabs.customers import CustomersView
+from frontend.tabs.inventory import InventorySalesReportView
+from frontend.tabs.reports import WeeklySalesReportView
 
 ctk.set_appearance_mode("light") 
 ctk.set_default_color_theme("blue")
@@ -61,16 +63,48 @@ class NationalOfficeApp(ctk.CTk):
         db_config = {
             "dbname": "nos_customerdb", #this is the database name for customers, you can change it if you want but make sure to update the database name in the SQL scripts as well
             "user": "postgres",
-            "password": "your_postgre_password", #apply your postgre password here.
+            "password": "repane91", #apply your postgre password here.
             "host": "localhost",
             "port": 5432
         }
         self.current_view = CustomersView(self.content_container, self, db_config)
         self.current_view.grid(row=0, column=0, sticky="nsew")
+
     def show_orders(self): print("Navigation: Orders")
-    def show_inventory(self): print("Navigation: Inventory")
+
+    def show_inventory(self):       
+        self._clear_content()
+        db_config = {
+            "dbname":   "school db",  
+            "user":     "postgres",
+            "password": "repane91",
+            "host":     "localhost",
+            "port":     5432
+        }
+        self.current_view = InventorySalesReportView(
+            self.content_container,
+            controller=self,
+            db_config=db_config         
+        )
+        self.current_view.grid(row=0, column=0, sticky="nsew")
+
     def show_payroll(self): print("Navigation: Payroll")
-    def show_reports(self): print("Navigation: Reports")
+    def show_reports(self):
+        self._clear_content()
+        db_config = {
+            "dbname":   "school db",  
+            "user":     "postgres",
+            "password": "repane91",
+            "host":     "localhost",
+            "port":     5432
+        }
+        self.current_view = WeeklySalesReportView(
+            self.content_container,
+            controller=self,
+            db_config=db_config
+        )
+        self.current_view.grid(row=0, column=0, sticky="nsew") 
+
     def logout(self): self.destroy()
 
 if __name__ == "__main__":
