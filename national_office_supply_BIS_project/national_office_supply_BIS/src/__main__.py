@@ -35,7 +35,7 @@ class NationalOfficeApp(ctk.CTk):
         self.top_bar = TopBar(self, role=role)
         self.top_bar.grid(row=0, column=1, sticky="ew")
 
-        # 4. Content Container (DEFINED BEFORE USE)
+        # 4. Content Container
         self.content_container = ctk.CTkFrame(self, fg_color="#f8f9fa", border_width=0)
         self.content_container.grid(row=1, column=1, sticky="nsew")
         self.content_container.grid_columnconfigure(0, weight=1)
@@ -59,13 +59,14 @@ class NationalOfficeApp(ctk.CTk):
         )
         self.current_view.grid(row=0, column=0, sticky="nsew")
 
-    # --- Navigation Placeholders ---
+    # --- Navigation Methods ---
+
     def show_customers(self):
         self._clear_content()
         db_config = {
-            "dbname": "nos_customerdb",  # this is the database name for customers, you can change it if you want but make sure to update the database name in the SQL scripts as well
+            "dbname": "nos_customerdb",
             "user": "postgres",
-            "password": "repane91",  # apply your postgre password here.
+            "password": "maomao220", 
             "host": "localhost",
             "port": 5432,
         }
@@ -76,17 +77,27 @@ class NationalOfficeApp(ctk.CTk):
         print("Navigation: Orders")
 
     def show_inventory(self):
-        print("Navigation: Inventory")
-
-    def show_payroll(self):
-        print("Navigation: Payroll")
+        self._clear_content()
+        # Updated to your nos_stockdb
+        db_config = {
+            "dbname": "nos_stockdb",
+            "user": "postgres",
+            "password": "maomao220",
+            "host": "localhost",
+            "port": 5432,
+        }
+        self.current_view = InventorySalesReportView(
+            self.content_container, controller=self, db_config=db_config
+        )
+        self.current_view.grid(row=0, column=0, sticky="nsew")
 
     def show_reports(self):
         self._clear_content()
+        # Updated to your nos_stockdb
         db_config: DBConfig = {
-            "dbname": "school db",
+            "dbname": "nos_stockdb",
             "user": "postgres",
-            "password": "repane91",
+            "password": "maomao220",
             "host": "localhost",
             "port": 5432,
         }
@@ -95,12 +106,14 @@ class NationalOfficeApp(ctk.CTk):
         )
         self.current_view.grid(row=0, column=0, sticky="nsew")
 
+    def show_payroll(self):
+        # Added this method to prevent the sidebar from crashing the app
+        print("Navigation: Payroll")
+
     def logout(self):
         self.destroy()
 
 
 if __name__ == "__main__":
-    # You can change "Manager" here to test the dynamic role
     app = NationalOfficeApp(role="Manager")
     app.mainloop()
-
