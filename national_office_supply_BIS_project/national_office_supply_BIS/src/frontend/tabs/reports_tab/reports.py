@@ -15,6 +15,7 @@ import customtkinter as ctk
 from typing import TypedDict
 
 from frontend.tabs.reports_tab.weekly_sales import WeeklySalesReportView
+from frontend.tabs.reports_tab.stock_ordering import StockOrderingReportView
 from frontend.modular.reports_sidebar import ReportsSidebar
 
 
@@ -213,7 +214,11 @@ class ReportsHubView(ctk.CTkFrame):
         elif section_key == "inventory_report":
             return self._create_placeholder("Inventory Report", section_key)
         elif section_key == "stock_ordering":
-            return self._create_placeholder("Stock Ordering Report", section_key)
+            return StockOrderingReportView(
+                self.view_host,
+                controller=self.controller,
+                db_config=self.db_config,
+            )
         elif section_key == "customer_balances":
             return self._create_placeholder("Customer List & Balances", section_key)
         elif section_key == "customer_payments":
