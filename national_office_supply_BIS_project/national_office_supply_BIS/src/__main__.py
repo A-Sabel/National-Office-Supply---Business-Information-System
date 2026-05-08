@@ -4,10 +4,13 @@ import customtkinter as ctk
 from frontend.modular.navigation_bar import NavigationSidebar
 from frontend.modular.top_bar import TopBar
 from frontend.tabs.dashboard import DashboardView
+from frontend.tabs.customers import CustomersView
 
 class NationalOfficeApp(ctk.CTk):
     def __init__(self, role="Manager"):
         super().__init__()
+        self.role = role
+        self.username = "Andrea Ysabela"
         # Ensure the base window matches the sidebar/dashboard to hide gaps
         self.configure(fg_color="#ffffff") 
         self.title("National Office Supplies BIS")
@@ -33,19 +36,39 @@ class NationalOfficeApp(ctk.CTk):
         self.content_container.grid_rowconfigure(0, weight=1)
 
         # 5. Load the Dashboard
-        self.show_dashboard("Andrea Ysabela", role)
+        self.show_dashboard(self.username, self.role)
 
-    def show_dashboard(self, username, role):
+    def _clear_content(self):
+        for widget in self.content_container.winfo_children():
+            widget.destroy()
+
+    def show_dashboard(self, username=None, role=None):
         self._clear_content()
-        self.current_view = DashboardView(self.content_container, self, username=username, role=role)
+        if username is None:
+            username = self.username
+        if role is None:
+            role = self.role
+        self.current_view = DashboardView(self.content_container, self,
+                                        username=username, role=role)
         self.current_view.grid(row=0, column=0, sticky="nsew")
+
 
     def _clear_content(self):
         for widget in self.content_container.winfo_children():
             widget.destroy()
 
     # --- Navigation Placeholders ---
-    def show_customers(self): print("Navigation: Customers")
+    def show_customers(self):
+        self._clear_content()
+        db_config = {
+            "dbname": "nos_customerdb", #this is the database name for customers, you can change it if you want but make sure to update the database name in the SQL scripts as well
+            "user": "postgres",
+            "password": "your_postgre_password", #apply your postgre password here.
+            "host": "localhost",
+            "port": 5432
+        }
+        self.current_view = CustomersView(self.content_container, self, db_config)
+        self.current_view.grid(row=0, column=0, sticky="nsew")
     def show_orders(self): print("Navigation: Orders")
     def show_inventory(self): print("Navigation: Inventory")
     def show_payroll(self): print("Navigation: Payroll")
