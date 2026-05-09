@@ -210,6 +210,17 @@ class CustomersView(ctk.CTkFrame):
         )
         process_btn.pack(fill="x", padx=12, pady=12)
 
+        # Ensure customer sequence starts at 41 (run once on load)
+        try:
+            conn = self._connect()
+            cur = conn.cursor()
+            cur.execute("SELECT setval('customers_customer_number_seq', 40);")
+            conn.commit()
+            cur.close()
+            conn.close()
+        except Exception as e:
+            print("Warning: could not set customer sequence:", e)
+
         # Load initial data
         self.load_customers()
 
@@ -674,7 +685,7 @@ class CustomersView(ctk.CTkFrame):
         contact = self.contact_entry.get().strip()
         phone = self.phone_entry.get().strip()
         address = self.address_entry.get().strip()
-        balance_text = self.balance_entry.get().strip()  # <- bagong field
+        balance_text = self.balance_entry.get().strip()
 
         if not company or not address:
             messagebox.showwarning("Validation", "Company and Address are required.")
@@ -697,6 +708,7 @@ class CustomersView(ctk.CTkFrame):
         try:
             conn = self._connect()
             cur = conn.cursor()
+
             cur.execute(
                 """
                 INSERT INTO customers (company_name, customer_name, phone_number, address, current_balance)
@@ -716,7 +728,7 @@ class CustomersView(ctk.CTkFrame):
             self.contact_entry.delete(0, "end")
             self.phone_entry.delete(0, "end")
             self.address_entry.delete(0, "end")
-            self.balance_entry.delete(0, "end")  # <- clear din yung balance
+            self.balance_entry.delete(0, "end")
 
             messagebox.showinfo("Success", f"Customer added (ID {new_id}) with balance ₱{opening_balance:,.2f}.")
             self.load_customers()
