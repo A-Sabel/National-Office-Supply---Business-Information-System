@@ -8,40 +8,374 @@ Use this file as your live implementation checklist.
 - [ ] Phase 2: Core Workflows and UI Integration complete
 - [ ] Phase 3: Validation, Hardening, and Delivery complete
 
-Completed Requirements: `0 / 17`  
+Completed Requirements: `10 / 17`  
 Last Updated: `2026-05-09`
 
 Current Code Snapshot:
 
 - Reports are now routed through `ReportsHubView` under `frontend/tabs/reports_tab/`.
 - Implemented reports: Inventory Report, Weekly Sales Report, Stock Ordering Report.
+- Weekly Sales also covers rep commissions and high-performance rep summaries.
+- `navigation_bar.py` already hides Manager-only tabs for non-manager roles.
+- `CustomersView` already supports live balance display, search/filtering, payments, and customer edits.
+- PostgreSQL schema migration has already been executed; the database tables are created.
 - Placeholder reports (still pending): Customer List & Balances, Customer Payment History.
 - `orders_and_invoices.py` exists but is currently empty.
+
+QD Section Prep:
+
+- [x] Create standalone `queries.sql` with QD-Sec1 to QD-Sec15 using the live schema names
+- [x] Add `backend/query_manager.py` to run QD queries from Python
+- [ ] Wire QD reads into the existing Reports, Inventory, Payroll, and Orders UI paths
+- [ ] Keep QD update actions documented separately from read-only report queries
 
 ---
 
 ## 3-Phase Breakdown
 
-### Phase 1: Foundation and Data Layer
+### Phase 1: Foundation and Data Layer (Weeks 1–2)
 
-- [ ] Finalize database schema and constraints (`Customers`, `Invoices`, `Parts`, `Employees`, `Timecards`, `Payments`, `Part_Suppliers`, `Logs`)
-- [ ] Implement base backend services for reusable DB access (replace view-only query ownership)
-- [ ] Complete FS-Sec1 and FS-Sec2 foundations (RBAC guards + automated identifiers)
-- [ ] Stabilize customer, inventory, and report modules against the finalized schema
+**Goal:** Establish all database tables, core services, RBAC structure, and prepare UI for integration.  
+**Status:** Foundation for all downstream work; blocks Phase 2.
 
-### Phase 2: Core Workflows and UI Integration
+#### 1A. Database Schema Creation (Week 1, Days 1–2) — **CRITICAL PATH**
 
-- [ ] Complete Orders and Invoices workflow (`orders_and_invoices.py`)
-- [ ] Implement payroll and timecard workflows (Requirements 6, 7, 8, 9)
-- [ ] Complete remaining report views and exports (customer balances, payment history, payroll report)
-- [ ] Enforce business-rule workflows end-to-end (shipping, stock decrement, backlog, supplier costing)
+Tasks mapped to: Req 1, 2, 3, 10, 14, 16, 17
 
-### Phase 3: Validation, Hardening, and Delivery
+- [x] Execute SQL migration: Create `Customers` table (`customer_id`, `customer_number`, `company_name`, `address`, `contact`, `balance`, `is_active`)
+- [x] Execute SQL migration: Create `Parts` table (`part_id`, `part_number`, `selling_price`, `description`, `stock_count`, `on_order`, `trigger_amount`, `restock_value`)
+- [x] Execute SQL migration: Create `Employees` table (`employee_id`, `employee_number`, `name`, `ssn_encrypted`, `position`, `hourly_wage`, `is_active`, `address`)
+- [x] Execute SQL migration: Create `Part_Suppliers` junction table (`part_id`, `supplier_id`, `cost`, `UNIQUE(part_id, supplier_id)`)
+- [x] Execute SQL migration: Create `Suppliers` table (`supplier_id`, `supplier_name`, `address`, `contact`)
+- [x] Execute SQL migration: Create `Invoices` table (`invoice_id`, `customer_id`, `rep_id`, `invoice_date`, `total_amount`, `status`, `shipped_date`, `is_paid`)
+- [x] Execute SQL migration: Create `Invoice_Lines` table (`line_id`, `invoice_id`, `part_id`, `quantity_ordered`, FOREIGN KEY constraints)
+- [x] Execute SQL migration: Create `Timecards` table (`timecard_id`, `employee_id`, `week_date`, `hours_worked`, `is_complete`)
+- [x] Execute SQL migration: Create `Payments` table (`payment_id`, `customer_id`, `payment_date`, `amount`, `payment_method`)
+- [x] Execute SQL migration: Create `Logs` table (`log_id`, `actor_id`, `action_type`, `target_table`, `target_id`, `timestamp`, `details`)
+- [x] Add constraints: `NOT NULL`, `CHECK (quantity >= 0)`, `CHECK (price >= 0)`, currency fields as `NUMERIC(10,2)`
+- [x] Add indices: `Invoices(customer_id)`, `Invoices(rep_id)`, `Parts(stock_count)`, `Timecards(employee_id, week_date)`
+- [ ] Seed test data: check Document in gdocs
+- [ ] **Deliverable:** Full schema with constraints, indices, and test data; database ready for queries
 
-- [ ] Implement full testing coverage (unit, integration, workflow validation)
-- [ ] Complete safety nets (audit logging, weekly trigger resilience, uniqueness constraints)
-- [ ] Add controller-layer authorization and transaction guards across all writes
-- [ ] Prepare final verification package (checklist evidence, screenshots, and demo-ready flows)
+#### 1B. Backend Service Layer (Week 1, Days 3–5) — **PRIORITY: HIGH**
+
+Tasks mapped to: All technical implementation items 1–15
+
+- [ ] Create `backend/database_service.py`: Centralized DB connection management (psycopg2 pool or single connection wrapper)
+- [ ] Implement `CustomerService`: `get_all()`, `get_by_id()`, `create()`, `update()`, `update_balance()`, `delete()` (soft delete with `is_active = FALSE`)
+- [ ] Implement `PartService`: `get_all()`, `get_by_id()`, `create()`, `update()`, `get_low_stock()`, `update_stock()`, `get_supplier_cost()`
+- [ ] Implement `EmployeeService`: `get_all()`, `get_by_id()`, `get_hourly_staff()`, `get_active_staff()`
+- [ ] Implement `InvoiceService`: `create()`, `add_line_item()`, `get_invoice_total()`, `update_status()`, `get_customer_invoices()`
+- [ ] Implement `TimecardService`: `create_weekly_timecards()`, `get_missing_timecards()`, `mark_complete()`, `check_if_week_exists()`
+- [ ] Implement `PaymentService`: `record_payment()`, `get_customer_payments()`, `mark_invoice_paid()`, `update_balance()`
+- [ ] Implement `ReportService`: Base class for report queries with reusable filter/sort/export logic
+- [ ] Implement `SupplierCostService`: `get_lowest_cost_supplier()`, `get_all_costs_for_part()` (maps to Req 14)
+- [ ] **Deliverable:** Service layer with tested basic CRUD and query operations; all tab views can delegate to services
+
+#### 1C. RBAC & Security Foundations (Week 1, Days 4–5 + Week 2, Day 1) — **PRIORITY: HIGH**
+
+Tasks mapped to: FS-Sec1, FS-Sec2, FS-Sec3, Req 16
+
+- [ ] Implement login validation: Hash password check against `Employees(position, employee_number)`
+- [ ] Extend `__main__.py` session state: Track `current_user`, `user_role` (Manager/Rep/Hourly), `session_start_time`
+- [ ] Create RBAC guard module: `@require_role('Manager')`, `@require_role('Rep')`, etc.
+- [x] Update `navigation_bar.py`: Conditionally show/hide tabs based on `current_user.position` (Payroll/Timecards hidden for Reps)
+- [ ] Implement `SessionManager`: Session validation, timeout, role-based view access checks
+- [ ] Add SSN encryption utility: `encrypt_ssn()`, `decrypt_ssn()` (using `cryptography` library or simple AES)
+- [x] Validate automated ID strategy: Ensure all primary keys use `SERIAL`/`BIGSERIAL` (FS-Sec2)
+- [ ] **Deliverable:** Login flow secure and session-aware; Managers vs. Reps see different UIs; SSN encrypted in DB
+
+#### 1D. UI Stabilization & Integration Tests (Week 2, Days 1–2)
+
+Tasks mapped to: All existing views (customers, inventory, reports)
+
+- [ ] Update `CustomersView`: Wire balance display to `CustomerService.get_by_id()` (live DB pull)
+- [ ] Update `CustomersView`: Wire payment processing to `PaymentService.record_payment()` and balance update
+- [ ] Update `InventoryView`: Wire data loaders to `PartService` and `SupplierCostService`
+- [ ] Update `ReportsHubView`: Wire all report endpoints to `ReportService` base methods
+- [ ] Run integration test: Create order → check invoice total → check invoice in DB
+- [ ] Run integration test: Record payment → check customer balance updated → check Payments table
+- [ ] Run integration test: Load inventory → verify stock counts match DB
+- [ ] **Deliverable:** All existing views pull live data from new service layer; no more hardcoded test data
+
+#### Phase 1 Summary
+
+**Dependencies Cleared:** ✅ Database is source of truth. Services provide consistent query interface. RBAC prevents unauthorized access.  
+**Ready for Phase 2:** ✅ All views can be enhanced with new workflows (orders, payroll, etc.).  
+**Estimated Duration:** 10 business days (2 weeks, assuming 5 hr/day on project).
+
+---
+
+### Phase 2: Core Workflows and UI Integration (Weeks 3–4)
+
+**Goal:** Implement orders, invoicing, payroll, timecards, and multi-part workflows. Enforce all business rules end-to-end.  
+**Status:** Builds on Phase 1; enables Phase 3 testing and hardening.
+
+#### 2A. Orders & Invoices Workflow (Week 3, Days 1–3) — **PRIORITY: CRITICAL**
+
+Tasks mapped to: Req 2, 3, 11, 13, 15; Technical items 10, 11
+
+- [ ] Implement `OrdersView` in `orders_and_invoices.py`:
+  - [ ] "New Order" form: Customer lookup, part multi-select, qty input, dynamic line item UI
+  - [ ] Over-selling guard: Check `part.stock_count >= line_qty` before allowing confirm (Manager override option)
+  - [ ] Line item management: Add/remove rows, recalculate invoice total on the fly
+  - [ ] Submit order: Call `InvoiceService.create()` → stores invoice + line items → sets status='pending'
+  - [ ] Invoice list: Display pending/shipped invoices; filter by status
+  - [ ] Shipment button: Click → `InvoiceService.update_status('shipped')` → triggers `PartService.update_stock()` for each line
+  - [ ] Cancellation: Only allow if status != 'shipped'; sets status='void', removes line items
+- [ ] Backend order validation:
+  - [ ] Quantity must be >= 1
+  - [ ] Customer must exist and `is_active = TRUE`
+  - [ ] Part must exist and have stock (or Manager override)
+  - [ ] Invoice total calculated correctly: `SUM(qty * selling_price)` per line
+- [ ] Implement invoice-to-shipment chain: When marked shipped, decrement parts and update customer balance (Req 13)
+- [ ] **Deliverable:** Full order-to-shipment flow; parts decrement on ship; customer balance updates; no overselling without Manager override
+
+#### 2B. Payroll & Timecard Workflows (Week 3, Days 3–5 + Week 4, Day 1) — **PRIORITY: CRITICAL**
+
+Tasks mapped to: Req 6, 7, 8, 9, 12; Technical items 1, 2, 8, 9, 12
+
+- [ ] Implement weekly timecard auto-generation:
+  - [ ] On app startup: `TimecardService.check_if_week_exists(this_week_date)`
+  - [ ] If missing AND not Sales Rep AND `is_active = TRUE`: Auto-create blank timecards for all hourly staff
+  - [ ] Prevent duplicates: Validate no existing record before insert
+  - [ ] Test: Restart app mid-week → verify no duplicate timecards created
+- [ ] Implement `PayrollView` in `payroll.py`:
+  - [ ] "Missing Timecards" panel: Show hourly staff missing entries for current week (using `LEFT JOIN` logic)
+  - [ ] "Payroll Issuance" section:
+    - [ ] Button to generate weekly payroll (Monday via manual trigger in demo)
+    - [ ] For each hourly employee with complete timecard: `gross = hours_worked * hourly_wage`
+    - [ ] For each Rep this week: `commission = total_invoices_rep_wrote * 0.05` (5%)
+    - [ ] Export payroll to CSV: `employee_number | name | gross | commission | net`
+  - [ ] Button to "Issue Check": Records `Payment` for each employee, updates YTD sales
+  - [ ] Payroll history: List of past payroll runs (date, num checks issued)
+- [ ] Implement sales rep commission tracking:
+  - [ ] Identify invoices written by rep this week (filter by `invoices.rep_id`)
+  - [ ] Sum invoice totals, multiply by 0.05 → commission amount
+  - [ ] Show in payroll export and Reports tab
+- [ ] Implement YTD sales update:
+  - [ ] Query `SUM(invoices.total_amount)` per rep since year start
+  - [ ] Store in employee record (or ephemeral in report)
+  - [ ] Display in Rep Performance report
+- [ ] **Deliverable:** Timecards auto-generate weekly. Payroll form calculates gross (hourly) + commission (5% reps) + YTD. Checks issued and exported.
+
+#### 2C. Advanced Reporting & Analytics (Week 4, Days 2–4) — **PRIORITY: HIGH**
+
+Tasks mapped to: Req 4, 9; Technical items 3, 4, 7, 9, 12, 13
+
+- [ ] Complete "Customer List & Balances" report:
+  - [ ] Query: `SELECT customer_id, company_name, balance, is_active FROM Customers`
+  - [ ] Dynamic search/filter by company name or customer number
+  - [ ] Show: Customer #, Company, Address, Current Balance, Status (Active/Closed)
+  - [ ] Export to CSV with same columns
+- [ ] Complete "Customer Payment History" report:
+  - [ ] Query: `SELECT customer_id, payment_date, amount, payment_method FROM Payments ORDER BY payment_date DESC`
+  - [ ] Optional filter by date range or customer
+  - [ ] Display: Customer, Date, Amount, Method, Running Balance
+  - [ ] Export to CSV
+- [ ] Enhance Stock Ordering Report (Technical item 3):
+  - [ ] Query: `SELECT part_id, part_number, description, stock_count, trigger_amount, on_order FROM Parts WHERE stock_count <= trigger_amount ORDER BY stock_count ASC`
+  - [ ] Show parts due for restock with current vs. target levels
+  - [ ] Link to supplier cost data (cheapest supplier per part)
+- [ ] Implement Supplier-Centric View (Technical item 7):
+  - [ ] Query suppliers, their parts, and costs
+  - [ ] Aggregate total spending per supplier this week/month
+  - [ ] Sort by supplier ID and part ID
+- [ ] Implement High-Performance Reps Report (Technical item 12):
+  - [ ] Identify reps with > 10 invoices in target week
+  - [ ] Show: Rep Name, Invoice Count, Total Sales, Avg Invoice Value
+- [ ] Implement Best Price Procurement (Technical item 13):
+  - [ ] `SELECT DISTINCT ON (part_id) ... ORDER BY part_id, cost ASC` → lowest cost per part
+  - [ ] Display recommended supplier for each part
+- [ ] **Deliverable:** All 5 reports in ReportsHubView fully functional with live data, export, and filtering
+
+#### 2D. Inventory & Stock Management (Week 4, Days 3–4) — **PRIORITY: MEDIUM**
+
+Tasks mapped to: Req 5, 13; Technical items 5, 6, 14
+
+- [ ] Implement critical stock alerts:
+  - [ ] Query: `Parts WHERE stock_count <= 1 AND on_order = FALSE AND part_id IN (SELECT DISTINCT part_id FROM Invoice_Lines WHERE invoice_id IN (SELECT invoice_id FROM Invoices WHERE status = 'pending'))`
+  - [ ] Display as critical alerts in top bar alert dropdown
+  - [ ] Show: Part #, Current Stock, Linked Unshipped Orders count
+- [ ] Implement inventory bottleneck detection (Technical item 5):
+  - [ ] Join `Invoice_Lines`, `Invoices`, `Parts`
+  - [ ] Filter: `Invoices.status = 'pending' AND Parts.stock_count <= 1`
+  - [ ] Show in alerts: "Order #X blocked: Part Y (stock: 0) needed"
+- [ ] Dynamic restocking strategy (Technical item 14):
+  - [ ] Find top 2 parts by YTD sales volume
+  - [ ] Double their `restock_value`
+  - [ ] Verify no unintended parts modified
+- [ ] Price inflation logic (Technical item 15):
+  - [ ] Parts with 0 YTD sales:
+    - [ ] If `restock_value < 4`: price \*= 1.10
+    - [ ] If `restock_value >= 4`: price \*= 1.20
+  - [ ] Run logic on-demand (admin button or scheduled)
+- [ ] **Deliverable:** Critical alerts working, bottlenecks shown, dynamic restocking and pricing applied
+
+#### Phase 2 Summary
+
+**Dependencies:** Builds on Phase 1 database and services.  
+**New Features:** Orders → Shipment → Stock Decrement → Balance Update → Payroll → Commission. Full invoice lifecycle. All reports live.  
+**Ready for Phase 3:** ✅ All workflows implemented; now need testing, audit logging, and final polish.  
+**Estimated Duration:** 10 business days (2 weeks, 5 hr/day).
+
+---
+
+### Phase 3: Validation, Hardening, and Delivery (Weeks 5–6)
+
+**Goal:** Comprehensive testing, audit logging, security hardening, and final QA. Ensure all 17 requirements are proven and demo-ready.  
+**Status:** Final validation before submission.
+
+#### 3A. Unit & Integration Testing (Week 5, Days 1–3) — **PRIORITY: CRITICAL**
+
+Tasks mapped to: All requirements via test coverage
+
+- [ ] Test database layer:
+  - [ ] Test `CustomerService.update_balance()`: Verify balance = invoices - payments
+  - [ ] Test `InvoiceService.create()`: Verify invoice total = SUM(lines)
+  - [ ] Test `InvoiceService.update_status('shipped')`: Verify parts decrement correctly
+  - [ ] Test `PartService.get_low_stock()`: Verify filter logic
+  - [ ] Test `TimecardService.create_weekly_timecards()`: Verify no duplicates, excludes Reps
+  - [ ] Test `PaymentService.record_payment()`: Verify balance updates, invoice marked paid when total >= sum
+  - [ ] Test `SupplierCostService.get_lowest_cost_supplier()`: Verify correct supplier returned
+- [ ] Test business rules:
+  - [ ] Req 1: Customer balance = invoices - payments ✓
+  - [ ] Req 2: Shipping status transitions (pending → shipped) ✓
+  - [ ] Req 3: Payment status (not paid → paid when total >= sum) ✓
+  - [ ] Req 4: Rep sales totals (SUM by rep_id) ✓
+  - [ ] Req 5: Stock vs. On Order alerts (critical when stock <= 1 + unshipped) ✓
+  - [ ] Req 6–9: Timecards, payroll, commission (5%), YTD sales ✓
+  - [ ] Req 10–17: All CRUD and rule-based logic ✓
+- [ ] Test RBAC:
+  - [ ] Manager can view/edit payroll, timecards, prices ✓
+  - [ ] Rep cannot see payroll or timecard tabs ✓
+  - [ ] Unauthorized write attempt → Access Denied alert ✓
+- [ ] **Deliverable:** Unit test suite (>30 tests) covering all services, business rules, and RBAC paths; all tests passing
+
+#### 3B. Audit Logging & Safety Nets (Week 5, Days 3–5) — **PRIORITY: HIGH**
+
+Tasks mapped to: FS-Sec1, FS-Sec2; Safety Nets 1–3
+
+- [ ] Implement audit logging in critical flows:
+  - [ ] Log every price modification: INSERT `Logs(actor_id, action='PRICE_UPDATE', target_table='Parts', target_id=part_id, details='{old_price, new_price}', timestamp=NOW())`
+  - [ ] Log every payroll check issuance: INSERT `Logs(actor_id, action='PAYROLL_ISSUED', target_table='Payments', target_id=payment_id, details='{employee_id, amount}', timestamp=NOW())`
+  - [ ] Log every invoice shipment: INSERT `Logs(actor_id, action='INVOICE_SHIPPED', target_table='Invoices', target_id=invoice_id, details='{status_change, stock_decrements}', timestamp=NOW())`
+  - [ ] Log customer balance updates: INSERT `Logs(actor_id, action='BALANCE_UPDATE', target_table='Customers', target_id=customer_id, details='{old_balance, new_balance, reason}', timestamp=NOW())`
+- [ ] Weekly trigger resilience (Safety Net 2):
+  - [ ] Change timecard generation from strict "Monday 12:00 AM" to "on app startup"
+  - [ ] Check if timecards for current week exist
+  - [ ] Only create if missing (idempotent logic)
+  - [ ] Test: Restart app 3 times in same week → verify only 1 timecard set created
+- [ ] Data integrity constraints (Safety Net 3):
+  - [ ] Add `UNIQUE(part_id, supplier_id)` on `Part_Suppliers`
+  - [ ] Verify no duplicate supplier-part entries can be inserted
+  - [ ] Test constraint violation → error handling in UI
+- [ ] Query audit report:
+  - [ ] Expose `Logs` table via read-only query in Reports tab
+  - [ ] Filter by action type, date range, actor
+  - [ ] Export to CSV for instructor verification
+- [ ] **Deliverable:** Audit trail complete for all sensitive actions; resilience patterns in place; all safety nets verified
+
+#### 3C. Controller Layer & Authorization (Week 5, Days 4–5 + Week 6, Day 1) — **PRIORITY: MEDIUM**
+
+Tasks mapped to: FS-Sec3, FS-Sec5, FS-Sec6
+
+- [ ] Add transaction guards to all writes:
+  - [ ] `@auth_required`, `@role_required('Manager')` decorators on sensitive endpoints
+  - [ ] Re-validate user session before INSERT/UPDATE/DELETE
+  - [ ] Wrap multi-step operations (e.g., shipment → stock decrement → balance update) in transaction block
+- [ ] Restrict price edits:
+  - [ ] `InventoryView` price field: Read-only unless `current_user.position == 'Manager'`
+  - [ ] Backend: `PartService.update()` checks role before allowing price change
+- [ ] Restrict worker file access (timecards, payroll):
+  - [ ] `PayrollView`, `PayrollView.timecards_panel`: Hidden for non-Managers
+  - [ ] Backend: Query endpoints return 403 if non-Manager requests payroll/timecard data
+- [ ] Form validation guards:
+  - [ ] Invoice line qty >= 1 and <= stock_count (unless Manager override)
+  - [ ] Payment amount > 0 and <= outstanding balance
+  - [ ] Timecard hours >= 0 and <= 168 (max hours in week)
+- [ ] Error handling:
+  - [ ] Invalid form data → show validation error message (red banner)
+  - [ ] Unauthorized action → show "Access Denied" alert
+  - [ ] Database constraint violation → show friendly error (e.g., "Duplicate supplier for this part")
+- [ ] **Deliverable:** All sensitive writes protected by role checks; form validation in place; error messages user-friendly
+
+#### 3D. Final QA & Verification Package (Week 6, Days 2–5) — **PRIORITY: CRITICAL**
+
+Tasks mapped to: All 17 requirements + FS-Sec items; Delivery readiness
+
+- [ ] Create verification checklist (screenshot evidence):
+  - [ ] Req 1: Show customer detail with balance calculation (screenshot)
+  - [ ] Req 2–3: Show shipping status and payment status in invoice list (screenshot)
+  - [ ] Req 4: Show rep performance report with totals (screenshot)
+  - [ ] Req 5: Show critical stock alert in alerts dropdown (screenshot)
+  - [ ] Req 6–9: Show timecard form, payroll issuance, commission calculation, YTD sales (screenshot)
+  - [ ] Req 10–17: Show part CRUD, invoice line items, commission, inventory update, supplier costs, customer details, employee profile, hourly wage (screenshot)
+- [ ] Run end-to-end workflows:
+  - [ ] Workflow 1: New order → multi-part → ship → stock decrement → customer balance update → verify DB
+  - [ ] Workflow 2: Record payment → customer balance decreases → invoice marked paid → verify DB
+  - [ ] Workflow 3: Timecard auto-generated → payroll issued → commission calculated → check exported → verify DB
+  - [ ] Workflow 4: Price updated by Manager → audit log created → verify Logs table
+  - [ ] Workflow 5: Rep logs in → payroll tab hidden; Manager logs in → payroll visible → verify RBAC
+- [ ] Performance validation:
+  - [ ] Generate 1000 invoice records → verify report loads in < 2 sec
+  - [ ] Query stock alerts with 100+ parts → verify < 1 sec response
+  - [ ] Concurrent payroll generation (if multi-user): Verify no race conditions
+- [ ] Documentation:
+  - [ ] Update README.md with setup instructions (DB schema, seed data, venv activation)
+  - [ ] Create DEPLOYMENT.md with prerequisite checklist (PostgreSQL version, Python 3.9+, CustomTkinter)
+  - [ ] Document RBAC model: Manager vs. Rep vs. Hourly roles and restrictions
+  - [ ] Screenshot guide: 5–8 key workflows showing all 17 requirements
+- [ ] Demo package:
+  - [ ] Sample data set: 10 customers, 20 parts, 4 employees, sample invoices
+  - [ ] Test account: Manager (user: `manager`, pwd: `demo123`), Rep (user: `rep1`, pwd: `demo123`)
+  - [ ] Demo script: "30-minute walkthrough" checklist of key workflows
+- [ ] Final sign-off:
+  - [ ] All 17 requirements verified in code and screenshots ✓
+  - [ ] All FS-Sec items implemented and tested ✓
+  - [ ] All 15 technical items completed ✓
+  - [ ] All business rules enforced end-to-end ✓
+  - [ ] Zero known bugs (all issues resolved or documented as future work)
+- [ ] **Deliverable:** Complete demo package with evidence, working system, documentation, and sign-off checklist
+
+#### Phase 3 Summary
+
+**Dependencies:** Builds on Phase 2 complete workflows.  
+**Focus:** Quality, security, compliance with all 17 requirements.  
+**Outcome:** Submission-ready system with full audit trail, test coverage, and documentation.  
+**Estimated Duration:** 10 business days (2 weeks, 5 hr/day).
+
+---
+
+## Phase Dependency Map
+
+```
+Phase 1 (Weeks 1–2)          Phase 2 (Weeks 3–4)          Phase 3 (Weeks 5–6)
+├─ Database Schema      →     ├─ Orders & Invoices   →     ├─ Unit/Integration Tests
+├─ Service Layer        →     ├─ Payroll & Timecards →     ├─ Audit Logging
+├─ RBAC & Security      →     ├─ Reports & Analytics →     ├─ Controller Authorization
+└─ UI Integration       →     └─ Stock Management    →     └─ Final QA & Verification
+```
+
+Phase 1 must complete before Phase 2 starts (database is prerequisite).  
+Phase 2 can proceed in parallel subtasks (Orders, Payroll, Reports, Inventory).  
+Phase 3 requires Phase 2 fully complete; focuses on validation and polish.
+
+---
+
+## Quick Reference: Phase-to-Requirement Mapping
+
+| Requirement                  | Phase               | Section              | Status      |
+| ---------------------------- | ------------------- | -------------------- | ----------- |
+| Req 1: Customer Balance      | 1C (DB) + 2A (Flow) | Orders/Payments      | Integrated  |
+| Req 2: Shipping Status       | 2A                  | Orders & Invoices    | In Phase 2  |
+| Req 3: Payment Status        | 2A                  | Orders & Invoices    | In Phase 2  |
+| Req 4: Rep Sales Tracking    | 2C                  | Advanced Reporting   | In Phase 2  |
+| Req 5: Stock vs. On Order    | 2D                  | Inventory & Stock    | In Phase 2  |
+| Req 6–9: Payroll & Timecards | 2B                  | Payroll & Timecard   | In Phase 2  |
+| Req 10–17: CRUD & Rules      | 1B + 2A-D           | Services + Workflows | Distributed |
+
+---
 
 ---
 
@@ -260,7 +594,7 @@ Current Code Snapshot:
 
 - [x] Ensure `Customers` includes `customer_number`, `company_name`, `address`
 - [ ] Populate invoice header fields when customer is selected
-- [x] Validate customer lookup/autocomplete flow in invoice UI
+- [ ] Validate customer lookup/autocomplete flow in invoice UI
 - [ ] Add test for invoice header auto-population
 
 ### 16. Employee Profiles
@@ -283,7 +617,7 @@ Current Code Snapshot:
 
 ### FS-Sec1: Security and Access Control
 
-- [x] Create login view module for credential validation against `Employees`
+- [ ] Create login view module for credential validation against `Employees`
 - [ ] Restrict worker file access (timecards, payroll) to managers only (FS-Sec1)
 - [ ] Enforce RBAC checks before opening restricted tabs (Manager-only views)
 - [ ] Show Access Denied alert when non-manager requests restricted actions
@@ -318,7 +652,7 @@ Current Code Snapshot:
 
 - [x] Create Inventory Report view (parts, stock counts, costs)
 - [x] Create Weekly Sales report (last 7 days invoice total)
-- [ ] Create Sales Rep Payroll report (commission calculation: `Sales * 0.05`)
+- [x] Create Sales Rep Payroll report (commission calculation: `Sales * 0.05`)
 - [x] Create Stock Ordering report (`stock <= trigger`)
 - [ ] Create searchable Customer List report (profiles and balances)
 - [ ] Add export option for each report (CSV/JSON)

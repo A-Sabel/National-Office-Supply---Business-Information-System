@@ -5,7 +5,7 @@ from frontend.modular.navigation_bar import NavigationSidebar
 from frontend.modular.top_bar import TopBar
 from frontend.tabs.dashboard import DashboardView
 from frontend.tabs.customers import CustomersView
-from frontend.tabs.inventory import InventorySalesReportView
+from frontend.tabs.inventory import InventoryView
 from frontend.tabs.reports_tab.reports import DBConfig, ReportsHubView
 
 ctk.set_appearance_mode("light")
@@ -66,7 +66,7 @@ class NationalOfficeApp(ctk.CTk):
         db_config = {
             "dbname": "nos_customerdb",
             "user": "postgres",
-            "password": "maomao220", 
+            "password": "maomao220",
             "host": "localhost",
             "port": 5432,
         }
@@ -78,7 +78,6 @@ class NationalOfficeApp(ctk.CTk):
 
     def show_inventory(self):
         self._clear_content()
-        # Updated to your nos_stockdb
         db_config = {
             "dbname": "nos_stockdb",
             "user": "postgres",
@@ -86,7 +85,7 @@ class NationalOfficeApp(ctk.CTk):
             "host": "localhost",
             "port": 5432,
         }
-        self.current_view = InventorySalesReportView(
+        self.current_view = InventoryView(
             self.content_container, controller=self, db_config=db_config
         )
         self.current_view.grid(row=0, column=0, sticky="nsew")

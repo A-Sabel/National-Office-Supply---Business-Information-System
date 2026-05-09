@@ -193,15 +193,23 @@ COMMENT ON COLUMN customer_payments.invoice_id IS 'NULL for general account cred
 
 -- TABLE 11: employee_payments
 CREATE TABLE employee_payments (
-    payment_id       SERIAL PRIMARY KEY,
-    employee_number  INTEGER NOT NULL REFERENCES employees(employee_number)
-                           ON DELETE RESTRICT ON UPDATE CASCADE,
-    timecard_id      INTEGER REFERENCES timecards(timecard_id)
-                           ON DELETE SET NULL ON UPDATE CASCADE,
-    check_number     VARCHAR(20) NOT NULL,
-    amount_paid      NUMERIC(10,2) NOT NULL CHECK (amount_paid > 0),
-    date_paid        DATE NOT NULL DEFAULT CURRENT_DATE
+    payment_id           SERIAL PRIMARY KEY,
+    employee_number      INTEGER NOT NULL REFERENCES employees(employee_number)
+                               ON DELETE RESTRICT ON UPDATE CASCADE,
+    timecard_id          INTEGER REFERENCES timecards(timecard_id)
+                               ON DELETE SET NULL ON UPDATE CASCADE,
+    invoice_period_end   DATE,
+    check_number         VARCHAR(20) NOT NULL,
+    amount_paid          NUMERIC(10,2) NOT NULL CHECK (amount_paid > 0),
+    date_paid            DATE NOT NULL DEFAULT CURRENT_DATE,
+    payment_type         VARCHAR(20) NOT NULL CHECK (payment_type IN ('hourly', 'commission'))
 );
+
+COMMENT ON TABLE  employee_payments              IS 'Payment records for all employees (hourly/commission).';
+COMMENT ON COLUMN employee_payments.timecard_id  IS 'NULL for sales reps; references timecard for hourly employees.';
+COMMENT ON COLUMN employee_payments.invoice_period_end IS 'Week-ending date for commission period; NULL for hourly timecards.';
+COMMENT ON COLUMN employee_payments.payment_type IS 'Either "hourly" (from timecard) or "commission" (from ytdsales).';
+
 
 
 -- ============================================================
