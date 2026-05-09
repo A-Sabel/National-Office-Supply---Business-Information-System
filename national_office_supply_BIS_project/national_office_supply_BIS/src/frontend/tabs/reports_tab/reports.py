@@ -18,6 +18,7 @@ from frontend.tabs.reports_tab.weekly_sales import WeeklySalesReportView
 from frontend.tabs.reports_tab.stock_ordering import StockOrderingReportView
 from frontend.modular.reports_sidebar import ReportsSidebar
 from frontend.tabs.reports_tab.inventory_report import InventorySalesReportView
+from frontend.tabs.reports_tab.customerList_balances import CustomerListReportView
 
 
 class DBConfig(TypedDict):
@@ -227,7 +228,13 @@ class ReportsHubView(ctk.CTkFrame):
                 db_config=self.db_config,
             )
         elif section_key == "customer_balances":
-            return self._create_placeholder("Customer List & Balances", section_key)
+            return CustomerListReportView(
+                self.view_host,
+                controller=self.controller,
+                db_config=self.db_config,
+                on_toggle_navigation=self.toggle_navigation,
+                is_navigation_visible=self._sidebar_visible,
+            )
         elif section_key == "customer_payments":
             return self._create_placeholder("Customer Payment History", section_key)
         else:
