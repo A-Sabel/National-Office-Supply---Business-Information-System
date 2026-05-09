@@ -8,6 +8,7 @@ from frontend.tabs.customers import CustomersView
 from frontend.tabs.inventory import InventoryView
 from frontend.tabs.orders_and_invoices import OrdersView
 from frontend.tabs.reports_tab.reports import DBConfig, ReportsHubView
+from frontend.tabs.payroll import PayrollView
 
 ctk.set_appearance_mode("light")
 ctk.set_default_color_theme("blue")
@@ -120,6 +121,11 @@ class NationalOfficeApp(ctk.CTk):
     def show_payroll(self):
         # Added this method to prevent the sidebar from crashing the app
         print("Navigation: Payroll")
+        self._clear_content()
+        self.current_view = PayrollView(
+            self.content_container, controller=self, role=self.role
+        )
+        self.current_view.grid(row=0, column=0, sticky="nsew")
 
     def logout(self):
         self.destroy()
