@@ -23,6 +23,106 @@ FONT_SMALL = ("Segoe UI", 10)
 FONT_TABLE = ("Segoe UI", 11)
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+#  KPI BAR
+# ══════════════════════════════════════════════════════════════════════════════
+class InventoryKPIBar(ctk.CTkFrame):
+    """Inventory metrics dashboard at top of page."""
+
+    def __init__(self, master, parts_data, **kw):
+        super().__init__(master, fg_color=PAGE_BG, **kw)
+        self.parts_data = parts_data
+        self._build()
+
+    def _build(self):
+        # Calculate metrics from parts data
+        total_parts = len(self.parts_data)
+
+        total_value = 0
+        low_stock_count = 0
+        out_of_stock_count = 0
+
+        for (
+            sku,
+            desc,
+            cat,
+            stock,
+            low_threshold,
+            price_str,
+            unit,
+            actions,
+        ) in self.parts_data:
+            try:
+                price = float(price_str.replace("$", "").replace(",", ""))
+                total_value += stock * price
+            except:
+                pass
+
+            if stock == 0:
+                out_of_stock_count += 1
+            elif stock < low_threshold:
+                low_stock_count += 1
+
+        cards = [
+            ("Total Parts (SKUs)", str(total_parts), BRAND_BLUE, "Catalog items"),
+            (
+                "Inventory Value",
+                f"₱{total_value:,.2f}",
+                "#16a34a",
+                "Total stock value",
+            ),
+            ("Low Stock Items", str(low_stock_count), ACCENT_AMBER, "Below threshold"),
+            ("Out of Stock", str(out_of_stock_count), ACCENT_RED, "Critical items"),
+        ]
+
+        # Container frame with grid layout for responsive card distribution
+        container = ctk.CTkFrame(self, fg_color="transparent")
+        container.pack(fill="both", expand=True, padx=0, pady=6)
+
+        # Configure equal column weights for responsive sizing
+        for i in range(len(cards)):
+            container.grid_columnconfigure(i, weight=1)
+
+        for idx, (title, val, clr, sub) in enumerate(cards):
+            card = ctk.CTkFrame(
+                container,
+                fg_color=CARD_BG,
+                corner_radius=12,
+                border_width=1,
+                border_color=BORDER,
+                height=108,
+            )
+            card.grid(
+                row=0,
+                column=idx,
+                sticky="nsew",
+                padx=(0 if idx == 0 else 5),
+                pady=0,
+            )
+            card.pack_propagate(False)
+
+            ctk.CTkLabel(
+                card,
+                text=title,
+                font=("Segoe UI", 11, "bold"),
+                text_color=TEXT_MUTED,
+            ).pack(anchor="w", padx=14, pady=(12, 0))
+
+            ctk.CTkLabel(
+                card,
+                text=val,
+                font=("Segoe UI", 22, "bold"),
+                text_color=TEXT_DARK,
+            ).pack(anchor="w", padx=14, pady=(2, 0))
+
+            ctk.CTkLabel(
+                card,
+                text=sub,
+                font=("Segoe UI", 10),
+                text_color=clr,
+            ).pack(anchor="w", padx=14, pady=(0, 12))
+
+
 class InventoryView(ctk.CTkFrame):
     def __init__(self, parent, controller=None, db_config=None, **kwargs):
         super().__init__(
@@ -36,6 +136,9 @@ class InventoryView(ctk.CTkFrame):
         self._parts_rows = []
         self._parts_tree = None
 
+        # Pre-build sample parts data for KPI calculations
+        self._build_sample_parts_data()
+
         # Fill frame completely
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(0, weight=3)
@@ -45,6 +148,11 @@ class InventoryView(ctk.CTkFrame):
         self.left_panel = ctk.CTkFrame(self, fg_color="transparent")
         self.left_panel.grid(row=0, column=0, sticky="nsew", padx=20, pady=20)
         self.left_panel.columnconfigure(0, weight=1)
+        self.left_panel.rowconfigure(1, weight=1)
+
+        # KPI Bar
+        kpi = InventoryKPIBar(self.left_panel, self._parts_rows)
+        kpi.grid(row=0, column=0, sticky="ew", pady=(0, 8))
 
         self._build_catalog_section()
 
@@ -60,13 +168,29 @@ class InventoryView(ctk.CTkFrame):
         self._build_place_order_card()
         self._build_receive_restock_card()
 
+    def _build_sample_parts_data(self):
+        """Pre-build sample parts data for KPI bar and table."""
+        seeds = [
+            ("BIC Pens Blue (12pk)", "Pens", 120, 20, "$5.49", "Pack"),
+            ("HP LaserJet Toner Black", "Toners", 485, 50, "$89.99", "Unit"),
+            ("Paper Mate Eraser Pink (Lg)", "Pens", 75, 50, "$69.99", "Unit"),
+            ("HP LaserJet Toner", "Toners", 200, 50, "$5.49", "Pack"),
+        ]
+        rows = []
+        for idx in range(102):
+            desc, cat, stock, low, price, unit = seeds[idx % len(seeds)]
+            sku = str(10000 + idx)
+            rows.append((sku, desc, cat, stock, low, price, unit, "✏️"))
+
+        self._parts_rows = rows
+
     # ════════════════════════════════════════════════════════════════════
     # LEFT PANEL: Catalog header + search + table
     # ════════════════════════════════════════════════════════════════════
     def _build_catalog_section(self):
         # Header row: title (left) + button (right)
         hdr = ctk.CTkFrame(self.left_panel, fg_color="transparent")
-        hdr.grid(row=0, column=0, sticky="ew", pady=(0, 15))
+        hdr.grid(row=1, column=0, sticky="ew", pady=(0, 8))
         hdr.columnconfigure(0, weight=1)
 
         ctk.CTkLabel(
@@ -112,7 +236,7 @@ class InventoryView(ctk.CTkFrame):
             border_width=1,
             border_color=BORDER,
         )
-        search_bar.grid(row=1, column=0, sticky="ew", pady=(0, 12))
+        search_bar.grid(row=2, column=0, sticky="ew", pady=(0, 12))
 
         inner = ctk.CTkFrame(search_bar, fg_color="transparent")
         inner.pack(fill="x", padx=12, pady=8)
@@ -210,8 +334,8 @@ class InventoryView(ctk.CTkFrame):
             border_width=1,
             border_color=BORDER,
         )
-        tbl_frame.grid(row=2, column=0, sticky="nsew", pady=(0, 0))
-        self.left_panel.rowconfigure(2, weight=1)
+        tbl_frame.grid(row=3, column=0, sticky="nsew", pady=(0, 0))
+        self.left_panel.rowconfigure(3, weight=1)
 
         self._build_parts_table(tbl_frame)
 
@@ -281,21 +405,8 @@ class InventoryView(ctk.CTkFrame):
             tree.column(col, width=width, anchor="w")
             tree.heading(col, text=col)
 
-        # Sample data for pageable table
-        seeds = [
-            ("BIC Pens Blue (12pk)", "Pens", 120, 20, "$5.49", "Pack"),
-            ("HP LaserJet Toner Black", "Toners", 485, 50, "$89.99", "Unit"),
-            ("Paper Mate Eraser Pink (Lg)", "Pens", 75, 50, "$69.99", "Unit"),
-            ("HP LaserJet Toner", "Toners", 200, 50, "$5.49", "Pack"),
-        ]
-        rows = []
-        for idx in range(102):
-            desc, cat, stock, low, price, unit = seeds[idx % len(seeds)]
-            sku = str(10000 + idx)
-            rows.append((sku, desc, cat, stock, low, price, unit, "✏️"))
-
+        # Use pre-built sample data (already in self._parts_rows)
         self._parts_tree = tree
-        self._parts_rows = rows
         self._current_page = 1
 
         tree.grid(row=0, column=0, sticky="nsew")
@@ -310,11 +421,11 @@ class InventoryView(ctk.CTkFrame):
     def _build_place_order_card(self):
         """Place Restock Order card."""
         card = self._create_card_container(self.right_panel)
-        card.pack(fill="x", pady=(0, 10))
+        card.pack(fill="x", pady=(0, 8))
 
         # Header with badge
         hdr = ctk.CTkFrame(card, fg_color="transparent")
-        hdr.pack(fill="x", padx=12, pady=(12, 0))
+        hdr.pack(fill="x", padx=10, pady=(8, 0))
 
         ctk.CTkLabel(
             hdr,
@@ -329,68 +440,68 @@ class InventoryView(ctk.CTkFrame):
             text="✓ Auto-Suggested: Lowest Cost Supplier",
             fg_color="#e8f5e9",
             text_color="#2e7d32",
-            font=("Segoe UI", 10, "bold"),
+            font=("Segoe UI", 9, "bold"),
             corner_radius=4,
         )
-        badge.pack(fill="x", padx=12, pady=(8, 8))
+        badge.pack(fill="x", padx=10, pady=(6, 6))
 
         # Form fields
         self._create_form_field(card, "Part Name/SKU", is_combo=True)
 
         qty_supplier = ctk.CTkFrame(card, fg_color="transparent")
-        qty_supplier.pack(fill="x", padx=12, pady=(2, 4))
+        qty_supplier.pack(fill="x", padx=10, pady=(2, 3))
         qty_supplier.columnconfigure(0, weight=1)
         qty_supplier.columnconfigure(1, weight=1)
 
         qty_frame = ctk.CTkFrame(qty_supplier, fg_color="transparent")
         qty_frame.grid(row=0, column=0, sticky="ew", padx=(0, 6))
         ctk.CTkLabel(
-            qty_frame, text="Quantity", font=FONT_BODY, text_color=TEXT_MUTED
+            qty_frame, text="Quantity", font=FONT_SMALL, text_color=TEXT_MUTED
         ).pack(anchor="w")
         ctk.CTkEntry(
-            qty_frame, height=30, fg_color="#f5f7fa", placeholder_text="500"
+            qty_frame, height=28, fg_color="#f5f7fa", placeholder_text="500"
         ).pack(fill="x", pady=(2, 0))
 
         supp_frame = ctk.CTkFrame(qty_supplier, fg_color="transparent")
         supp_frame.grid(row=0, column=1, sticky="ew", padx=(6, 0))
         ctk.CTkLabel(
-            supp_frame, text="Supplier", font=FONT_BODY, text_color=TEXT_MUTED
+            supp_frame, text="Supplier", font=FONT_SMALL, text_color=TEXT_MUTED
         ).pack(anchor="w")
         ctk.CTkComboBox(
             supp_frame,
             values=["Apex Office Solutions", "Office Mart"],
-            height=30,
+            height=28,
             fg_color="#f5f7fa",
         ).pack(fill="x", pady=(2, 0))
 
         # Price info
         price_info = ctk.CTkFrame(card, fg_color="#f5f7fa", corner_radius=6)
-        price_info.pack(fill="x", padx=12, pady=(8, 8))
+        price_info.pack(fill="x", padx=10, pady=(6, 6))
         price_info.grid_columnconfigure(0, weight=1)
         price_info.grid_columnconfigure(1, weight=1)
         ctk.CTkLabel(
             price_info,
             text="Est. Cost ₱2,745.00",
-            font=("Segoe UI", 10, "bold"),
+            font=("Segoe UI", 9, "bold"),
             text_color=TEXT_DARK,
-        ).grid(row=0, column=0, sticky="w", padx=12, pady=7)
+        ).grid(row=0, column=0, sticky="w", padx=10, pady=5)
         ctk.CTkLabel(
             price_info,
             text="$2,745.00",
-            font=("Segoe UI", 10, "bold"),
+            font=("Segoe UI", 9, "bold"),
             text_color=TEXT_DARK,
-        ).grid(row=0, column=1, sticky="e", padx=12, pady=7)
+        ).grid(row=0, column=1, sticky="e", padx=10, pady=5)
 
         # Submit button
         ctk.CTkButton(
             card,
             text="✈ Submit PO",
-            height=34,
+            height=32,
             corner_radius=6,
             fg_color=BRAND_BLUE,
             hover_color="#2980b9",
-            font=FONT_BODY,
-        ).pack(fill="x", padx=12, pady=(0, 10))
+            font=("Segoe UI", 11, "bold"),
+        ).pack(fill="x", padx=10, pady=(0, 8))
 
     def _build_receive_restock_card(self):
         """Receive Restock card."""
@@ -402,50 +513,50 @@ class InventoryView(ctk.CTkFrame):
             text="Receive Restock",
             font=FONT_SECTION,
             text_color=TEXT_DARK,
-        ).pack(anchor="w", padx=12, pady=(12, 6))
+        ).pack(anchor="w", padx=10, pady=(8, 4))
 
         # PO search
         search_row = ctk.CTkFrame(card, fg_color="#f5f7fa", corner_radius=6)
-        search_row.pack(fill="x", padx=12, pady=(0, 8))
+        search_row.pack(fill="x", padx=10, pady=(0, 6))
         search_row.grid_columnconfigure(0, weight=1)
         ctk.CTkEntry(
             search_row,
             placeholder_text="PO Number",
-            height=30,
+            height=28,
             fg_color="#f5f7fa",
             border_color=BORDER,
-        ).grid(row=0, column=0, sticky="ew", padx=(0, 2))
+        ).grid(row=0, column=0, sticky="ew", padx=(0, 2), pady=4)
         ctk.CTkLabel(
             search_row,
             text="🔍",
             font=("Segoe UI", 12),
             text_color=TEXT_MUTED,
             width=24,
-        ).grid(row=0, column=1, padx=(0, 8))
+        ).grid(row=0, column=1, padx=(0, 6))
 
         # Info section
         info_bg = ctk.CTkFrame(card, fg_color="#f8f9fa", corner_radius=6)
-        info_bg.pack(fill="x", padx=12, pady=(0, 8))
+        info_bg.pack(fill="x", padx=10, pady=(0, 6))
 
         ctk.CTkLabel(
             info_bg,
             text="PO-2023-112",
-            font=("Segoe UI", 12, "bold"),
+            font=("Segoe UI", 11, "bold"),
             text_color=TEXT_DARK,
-        ).pack(anchor="w", padx=10, pady=(6, 0))
+        ).pack(anchor="w", padx=8, pady=(4, 0))
 
         ctk.CTkLabel(
             info_bg,
             text="Supplier",
             font=FONT_SMALL,
             text_color=TEXT_MUTED,
-        ).pack(anchor="w", padx=10, pady=(6, 0))
-        ctk.CTkLabel(info_bg, text="Apex", font=FONT_BODY, text_color=TEXT_DARK).pack(
-            anchor="w", padx=10
-        )
+        ).pack(anchor="w", padx=8, pady=(3, 0))
+        ctk.CTkLabel(
+            info_bg, text="Apex", font=("Segoe UI", 11), text_color=TEXT_DARK
+        ).pack(anchor="w", padx=8, pady=(0, 2))
 
         summary_grid = ctk.CTkFrame(info_bg, fg_color="transparent")
-        summary_grid.pack(fill="x", padx=10, pady=(6, 8))
+        summary_grid.pack(fill="x", padx=8, pady=(3, 4))
         summary_grid.grid_columnconfigure((0, 1, 2), weight=1)
 
         for col, (label, value) in enumerate(
@@ -460,24 +571,24 @@ class InventoryView(ctk.CTkFrame):
             ctk.CTkLabel(
                 summary_grid,
                 text=value,
-                font=FONT_BODY,
+                font=("Segoe UI", 10),
                 text_color=TEXT_DARK,
-            ).grid(row=1, column=col, sticky="w", pady=(2, 0))
+            ).grid(row=1, column=col, sticky="w", pady=(1, 0))
 
         # Receiving status
         recv_label = ctk.CTkLabel(
             card,
             text="Receiving Status",
-            font=FONT_BODY,
+            font=FONT_SMALL,
             text_color=TEXT_MUTED,
         )
-        recv_label.pack(anchor="w", padx=12, pady=(8, 4))
+        recv_label.pack(anchor="w", padx=10, pady=(5, 2))
 
         recv_info = ctk.CTkFrame(card, fg_color="#f8f9fa", corner_radius=6)
-        recv_info.pack(fill="x", padx=12, pady=(0, 8))
+        recv_info.pack(fill="x", padx=10, pady=(0, 6))
 
         recv_head = ctk.CTkFrame(recv_info, fg_color="#edf0f4", corner_radius=4)
-        recv_head.pack(fill="x", padx=8, pady=(8, 4))
+        recv_head.pack(fill="x", padx=6, pady=(4, 2))
         recv_head.grid_columnconfigure((0, 1, 2, 3), weight=1)
         for col, name in enumerate(["Receiving Status", "Items", "Qty", "Total"]):
             ctk.CTkLabel(
@@ -485,30 +596,30 @@ class InventoryView(ctk.CTkFrame):
                 text=name,
                 font=FONT_SMALL,
                 text_color=TEXT_MUTED,
-            ).grid(row=0, column=col, sticky="w", padx=8, pady=4)
+            ).grid(row=0, column=col, sticky="w", padx=6, pady=3)
 
         recv_row = ctk.CTkFrame(recv_info, fg_color="#ffffff", corner_radius=4)
-        recv_row.pack(fill="x", padx=8, pady=(0, 8))
+        recv_row.pack(fill="x", padx=6, pady=(0, 4))
         recv_row.grid_columnconfigure((0, 1, 2, 3), weight=1)
         for col, value in enumerate(["PO-2023-112", "4", "0", "$2,745.00"]):
             ctk.CTkLabel(
                 recv_row,
                 text=value,
-                font=FONT_BODY,
+                font=("Segoe UI", 10),
                 text_color=TEXT_DARK,
-            ).grid(row=0, column=col, sticky="w", padx=8, pady=6)
+            ).grid(row=0, column=col, sticky="w", padx=6, pady=3)
 
         # Mark Received button
         ctk.CTkButton(
             card,
             text="⊞  Mark Received",
-            height=34,
+            height=32,
             corner_radius=6,
             fg_color="#ff3d1f",
             hover_color="#e33317",
             text_color="#ffffff",
-            font=("Segoe UI", 12, "bold"),
-        ).pack(fill="x", padx=12, pady=(0, 10))
+            font=("Segoe UI", 11, "bold"),
+        ).pack(fill="x", padx=10, pady=(0, 8))
 
     # ════════════════════════════════════════════════════════════════════
     # Helpers
@@ -526,23 +637,23 @@ class InventoryView(ctk.CTkFrame):
     def _create_form_field(self, parent, label, is_combo=False):
         """Create a form field with label."""
         frame = ctk.CTkFrame(parent, fg_color="transparent")
-        frame.pack(fill="x", padx=12, pady=(0, 6))
+        frame.pack(fill="x", padx=10, pady=(0, 5))
 
-        ctk.CTkLabel(frame, text=label, font=FONT_BODY, text_color=TEXT_MUTED).pack(
-            anchor="w", pady=(0, 4)
+        ctk.CTkLabel(frame, text=label, font=FONT_SMALL, text_color=TEXT_MUTED).pack(
+            anchor="w", pady=(0, 3)
         )
 
         if is_combo:
             ctk.CTkComboBox(
                 frame,
                 values=["BIC Pens Blue (12pk)", "HP LaserJet Toner"],
-                height=30,
+                height=28,
                 fg_color="#f5f7fa",
                 border_color=BORDER,
             ).pack(fill="x")
         else:
             ctk.CTkEntry(
-                frame, height=30, fg_color="#f5f7fa", border_color=BORDER
+                frame, height=28, fg_color="#f5f7fa", border_color=BORDER
             ).pack(fill="x")
 
     def _set_toggle_state(self, visible: bool):
