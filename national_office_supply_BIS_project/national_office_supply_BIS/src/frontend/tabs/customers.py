@@ -81,7 +81,6 @@ class CustomersView(ctk.CTkFrame):
         )
 
         # Sync the search bar toggle button with the right panel's initial visibility
-        # Panel is visible at init (we just grid'd it), so set to True
         try:
             self.search_bar.set_toggle_state(True)
         except Exception:
@@ -115,7 +114,7 @@ class CustomersView(ctk.CTkFrame):
             self.add_frame,
             text="Add Customer",
             font=("Segoe UI", 14, "bold"),
-            text_color="#2c3e50",  # Dark Blue-Grey
+            text_color="#2c3e50",
         ).pack(pady=(12, 8))
 
         self.company_entry = ctk.CTkEntry(
@@ -137,6 +136,12 @@ class CustomersView(ctk.CTkFrame):
         self.address_entry = ctk.CTkEntry(self.add_frame, placeholder_text="Address")
         self.address_entry.pack(fill="x", padx=12, pady=4)
         self._style_input(self.address_entry)
+
+        self.balance_entry = ctk.CTkEntry(
+            self.add_frame, placeholder_text="Current Balance (default: 0.00)"
+        )
+        self.balance_entry.pack(fill="x", padx=12, pady=4)
+        self._style_input(self.balance_entry)
 
         add_btn = ctk.CTkButton(
             self.add_frame,
@@ -169,7 +174,7 @@ class CustomersView(ctk.CTkFrame):
             self.payment_frame,
             text="Receive Payment",
             font=("Segoe UI", 14, "bold"),
-            text_color="#2c3e50",  # Dark Blue-Grey
+            text_color="#2c3e50",
         ).pack(pady=(12, 8))
 
         self.customer_dropdown = ctk.CTkComboBox(self.payment_frame, values=[])
@@ -182,8 +187,9 @@ class CustomersView(ctk.CTkFrame):
         self.amount_entry.pack(fill="x", padx=12, pady=6)
         self._style_input(self.amount_entry)
 
+        # FIX: payment method values must match DB CHECK constraint: 'check', 'cash', 'transfer'
         self.method_dropdown = ctk.CTkComboBox(
-            self.payment_frame, values=["Cash", "Credit Card", "Bank Transfer"]
+            self.payment_frame, values=["cash", "check", "transfer"]
         )
         self.method_dropdown.pack(fill="x", padx=12, pady=6)
         self._style_input(self.method_dropdown)
@@ -208,7 +214,6 @@ class CustomersView(ctk.CTkFrame):
         self.load_customers()
 
     def _style_input(self, widget):
-        # Build kwargs and filter unsupported options for specific widgets
         common_kwargs = dict(
             fg_color="#f8f9fa",
             border_width=1,
@@ -220,9 +225,6 @@ class CustomersView(ctk.CTkFrame):
         )
 
         if isinstance(widget, ctk.CTkComboBox):
-            # `CTkComboBox.configure` in some customtkinter versions does not accept
-            # `placeholder_text_color` (and Pylance may flag `**safe_kwargs` expansion).
-            # Pass the supported options explicitly to keep type checkers happy.
             widget.configure(
                 fg_color=common_kwargs["fg_color"],
                 border_width=common_kwargs["border_width"],
@@ -247,15 +249,12 @@ class CustomersView(ctk.CTkFrame):
             ("inactive", "Inactive"),
             ("gold", "Gold Tier"),
         ]
-        # If too many chips (or in narrow layouts), use a compact Filter button
         COMPACT_THRESHOLD = 4
-        # Clear existing
         for child in self.chips_frame.winfo_children():
             child.destroy()
         self.filter_buttons.clear()
 
         if len(chip_specs) > COMPACT_THRESHOLD:
-            # Compact: single filter button opens popup with options
             self.filter_button = ctk.CTkButton(
                 self.chips_frame,
                 text="Filter ∇",
@@ -289,7 +288,6 @@ class CustomersView(ctk.CTkFrame):
         self._refresh_filter_chip_styles()
 
     def _show_filter_popup(self):
-        # Reuse existing popup if open
         if (
             self.filter_popup is not None
             and getattr(self.filter_popup, "winfo_exists", lambda: False)()
@@ -302,7 +300,6 @@ class CustomersView(ctk.CTkFrame):
 
         self.filter_popup = ctk.CTkToplevel(self)
         self.filter_popup.overrideredirect(True)
-        # Position the popup near the filter button (fallback to chips_frame)
         fb = getattr(self, "filter_button", None)
         if fb is not None:
             bx = fb.winfo_rootx()
@@ -313,7 +310,6 @@ class CustomersView(ctk.CTkFrame):
                 bx = cf.winfo_rootx()
                 by = cf.winfo_rooty() + cf.winfo_height()
             else:
-                # Last resort: position near the parent frame
                 bx = self.winfo_rootx()
                 by = self.winfo_rooty() + self.winfo_height()
         self.filter_popup.geometry(f"220x160+{bx}+{by}")
@@ -344,7 +340,6 @@ class CustomersView(ctk.CTkFrame):
                     except Exception:
                         pass
                 self.set_active_filter(k)
-
             return _handler
 
         for key, label in chip_specs:
@@ -377,7 +372,6 @@ class CustomersView(ctk.CTkFrame):
                     text_color="#415162",
                 )
 
-        # If using the compact filter button, indicate active state by color
         fb = getattr(self, "filter_button", None)
         if fb is not None:
             if self.active_filter == "all":
@@ -390,21 +384,18 @@ class CustomersView(ctk.CTkFrame):
                 )
 
     def toggle_side_panels(self):
-        # Toggle based on our tracked state, not winfo_viewable() which may be stale
         if self._right_panel_visible:
             self.right_frame.grid_remove()
             self.grid_columnconfigure(0, weight=1)
             self.grid_columnconfigure(1, weight=0)
             self._right_panel_visible = False
         else:
-            # Re-grid the right panel with the same layout options to ensure proper placement
             self.right_frame.grid(
                 row=2, column=1, sticky="nsew", padx=(0, 20), pady=(0, 20)
             )
             self.grid_columnconfigure(0, weight=3)
             self.grid_columnconfigure(1, weight=2)
             self._right_panel_visible = True
-        # Keep the search bar toggle in sync with our tracked state
         try:
             self.search_bar.set_toggle_state(self._right_panel_visible)
         except Exception:
@@ -475,6 +466,8 @@ class CustomersView(ctk.CTkFrame):
 
         filtered = []
         for row in rows:
+            # row = (customer_number, company_name, customer_name, phone_number,
+            #         address, current_balance, is_active, balance_tier)
             _, _, _, _, _, balance, is_active, tier = row
             amount = (
                 float(balance) if isinstance(balance, (int, float, Decimal)) else 0.0
@@ -560,16 +553,33 @@ class CustomersView(ctk.CTkFrame):
         self.customer_dropdown.set(dropdown_values[0])
 
     def load_customers(self, rows=None):
-        """Load rows from customer_list_view and populate tree and dropdown.
-        If rows is provided, use it (used by search)."""
+        """
+        Load customers directly from the customers table.
+        FIX: No longer uses customer_list_view (didn't exist).
+             Computes balance_tier inline using CASE expression.
+             Uses customer_name (correct column) instead of contact_name (wrong).
+        """
         if rows is None:
             try:
                 conn = self._connect()
                 cur = conn.cursor()
                 cur.execute("""
-                    SELECT customer_number, company_name, contact_name, phone_number,
-                           address, current_balance, is_active, balance_tier
-                    FROM customer_list_view;
+                    SELECT
+                        customer_number,
+                        company_name,
+                        customer_name,
+                        phone_number,
+                        address,
+                        current_balance,
+                        is_active,
+                        CASE
+                            WHEN current_balance >= 10000 THEN 'Gold'
+                            WHEN current_balance >= 5000  THEN 'Silver'
+                            WHEN current_balance >= 1000  THEN 'Bronze'
+                            ELSE ''
+                        END AS balance_tier
+                    FROM customers
+                    ORDER BY company_name, customer_name;
                 """)
                 rows = cur.fetchall()
                 cur.close()
@@ -585,13 +595,12 @@ class CustomersView(ctk.CTkFrame):
     # Search
     # -------------------------
     def search_customers(self):
-        """Search DB by customer_number (exact) or company/contact (ILIKE)."""
+        """Search DB by customer_number (exact) or company/customer_name (ILIKE)."""
         term = self.search_var.get().strip()
         if not term:
             self.load_customers()
             return
 
-        # If term is integer, search by customer_number first
         try:
             cust_id = int(term)
         except Exception:
@@ -603,9 +612,21 @@ class CustomersView(ctk.CTkFrame):
             if cust_id is not None:
                 cur.execute(
                     """
-                    SELECT customer_number, company_name, contact_name, phone_number,
-                           address, current_balance, is_active, balance_tier
-                    FROM customer_list_view
+                    SELECT
+                        customer_number,
+                        company_name,
+                        customer_name,
+                        phone_number,
+                        address,
+                        current_balance,
+                        is_active,
+                        CASE
+                            WHEN current_balance >= 10000 THEN 'Gold'
+                            WHEN current_balance >= 5000  THEN 'Silver'
+                            WHEN current_balance >= 1000  THEN 'Bronze'
+                            ELSE ''
+                        END AS balance_tier
+                    FROM customers
                     WHERE customer_number = %s
                     ORDER BY company_name;
                 """,
@@ -615,10 +636,22 @@ class CustomersView(ctk.CTkFrame):
                 like_term = f"%{term}%"
                 cur.execute(
                     """
-                    SELECT customer_number, company_name, contact_name, phone_number,
-                           address, current_balance, is_active, balance_tier
-                    FROM customer_list_view
-                    WHERE company_name ILIKE %s OR contact_name ILIKE %s
+                    SELECT
+                        customer_number,
+                        company_name,
+                        customer_name,
+                        phone_number,
+                        address,
+                        current_balance,
+                        is_active,
+                        CASE
+                            WHEN current_balance >= 10000 THEN 'Gold'
+                            WHEN current_balance >= 5000  THEN 'Silver'
+                            WHEN current_balance >= 1000  THEN 'Bronze'
+                            ELSE ''
+                        END AS balance_tier
+                    FROM customers
+                    WHERE company_name ILIKE %s OR customer_name ILIKE %s
                     ORDER BY company_name;
                 """,
                     (like_term, like_term),
@@ -628,25 +661,7 @@ class CustomersView(ctk.CTkFrame):
             conn.close()
         except Exception as e:
             print("Error searching customers:", e)
-            # Fallback: client-side filter of currently loaded rows
             rows = []
-            for item in self.tree.get_children():
-                vals = self.tree.item(item)["values"]
-                if any(
-                    term.lower() in str(v).lower() for v in (vals[0], vals[1], vals[2])
-                ):
-                    rows.append(
-                        (
-                            vals[0],
-                            vals[1],
-                            vals[2],
-                            vals[3],
-                            vals[4],
-                            vals[5],
-                            vals[6],
-                            vals[7],
-                        )
-                    )
 
         self.load_customers(rows=rows)
 
@@ -655,14 +670,28 @@ class CustomersView(ctk.CTkFrame):
         self.load_customers()
 
     def add_customer(self):
-        """Insert a new customer into customers table and refresh."""
         company = self.company_entry.get().strip()
         contact = self.contact_entry.get().strip()
         phone = self.phone_entry.get().strip()
         address = self.address_entry.get().strip()
+        balance_text = self.balance_entry.get().strip()  # <- bagong field
 
         if not company or not address:
             messagebox.showwarning("Validation", "Company and Address are required.")
+            return
+
+        if not contact:
+            messagebox.showwarning("Validation", "Contact Name is required.")
+            return
+
+        # Parse balance — default 0 kung blank
+        try:
+            cleaned = balance_text.replace(",", "").replace("₱", "").strip()
+            opening_balance = Decimal(cleaned) if cleaned else Decimal("0.00")
+            if opening_balance < 0:
+                raise InvalidOperation
+        except (InvalidOperation, ValueError):
+            messagebox.showwarning("Validation", "Enter a valid balance amount (0 or more).")
             return
 
         try:
@@ -670,30 +699,38 @@ class CustomersView(ctk.CTkFrame):
             cur = conn.cursor()
             cur.execute(
                 """
-                INSERT INTO customers (company_name, contact_name, phone_number, address)
-                VALUES (%s, %s, %s, %s)
+                INSERT INTO customers (company_name, customer_name, phone_number, address, current_balance)
+                VALUES (%s, %s, %s, %s, %s)
                 RETURNING customer_number;
             """,
-                (company, contact, phone, address),
+                (company, contact, phone, address, opening_balance),
             )
             result = cur.fetchone()
             new_id = result[0] if result else None
             conn.commit()
             cur.close()
             conn.close()
+
             # Clear inputs
             self.company_entry.delete(0, "end")
             self.contact_entry.delete(0, "end")
             self.phone_entry.delete(0, "end")
             self.address_entry.delete(0, "end")
-            messagebox.showinfo("Success", f"Customer added (ID {new_id}).")
+            self.balance_entry.delete(0, "end")  # <- clear din yung balance
+
+            messagebox.showinfo("Success", f"Customer added (ID {new_id}) with balance ₱{opening_balance:,.2f}.")
             self.load_customers()
         except Exception as e:
             print("Error adding customer:", e)
             messagebox.showerror("Error", f"Could not add customer: {e}")
 
     def process_payment(self):
-        """Apply payment: subtract amount from current_balance for selected customer."""
+        """
+        Apply payment: insert into customer_payments and update current_balance.
+        FIX: Uses correct schema columns — amount_paid, payment_method, invoice_id.
+             Payment method must be 'cash', 'check', or 'transfer' (DB constraint).
+             invoice_id is left NULL (general account credit, allowed by schema).
+        """
         sel = self.customer_dropdown.get()
         if not sel or sel == "Select customer...":
             messagebox.showwarning(
@@ -721,16 +758,34 @@ class CustomersView(ctk.CTkFrame):
             messagebox.showwarning("Validation", "Enter a valid positive amount.")
             return
 
-        method = self.method_dropdown.get()
-        if not method:
-            messagebox.showwarning("Validation", "Select a payment method.")
+        method = self.method_dropdown.get().strip().lower()
+        if method not in ("cash", "check", "transfer"):
+            messagebox.showwarning(
+                "Validation", "Payment method must be cash, check, or transfer."
+            )
             return
-
-        note = self.note_entry.get().strip()
 
         try:
             conn = self._connect()
             cur = conn.cursor()
+
+            # 1. Insert payment record into customer_payments
+            #    invoice_id is NULL = general account credit (allowed by schema)
+            cur.execute(
+                """
+                INSERT INTO customer_payments (
+                    customer_number,
+                    invoice_id,
+                    payment_date,
+                    amount_paid,
+                    payment_method
+                )
+                VALUES (%s, NULL, CURRENT_DATE, %s, %s);
+            """,
+                (cust_id, amount, method),
+            )
+
+            # 2. Update the customer's running balance (decrease by amount paid)
             cur.execute(
                 """
                 UPDATE customers
@@ -745,102 +800,58 @@ class CustomersView(ctk.CTkFrame):
                 raise Exception("Customer not found.")
             new_balance = result[0]
 
-            self._record_payment_audit(
-                cur=cur,
-                cust_id=cust_id,
-                amount=amount,
-                method=method,
-                note=note,
-                balance_after=new_balance,
-            )
-
             conn.commit()
             cur.close()
             conn.close()
+
             messagebox.showinfo(
                 "Payment Processed",
-                f"Payment of {amount:,.2f} applied. New balance: ₱{new_balance:,.2f}",
+                f"Payment of ₱{amount:,.2f} applied.\nNew balance: ₱{new_balance:,.2f}",
             )
             self.amount_entry.delete(0, "end")
             self.note_entry.delete(0, "end")
             self.load_customers()
+
         except Exception as e:
             print("Error processing payment:", e)
             messagebox.showerror("Error", f"Could not process payment: {e}")
 
-    def _record_payment_audit(self, cur, cust_id, amount, method, note, balance_after):
-        try:
-            cur.execute("SAVEPOINT payment_audit_savepoint;")
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS customer_payments (
-                    payment_id SERIAL PRIMARY KEY,
-                    customer_number INTEGER NOT NULL REFERENCES customers(customer_number) ON DELETE CASCADE,
-                    payment_amount NUMERIC(12, 2) NOT NULL CHECK (payment_amount > 0),
-                    payment_method VARCHAR(50) NOT NULL,
-                    payment_note TEXT,
-                    balance_after NUMERIC(12, 2),
-                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-                );
-            """)
-            cur.execute(
-                """
-                INSERT INTO customer_payments (
-                    customer_number,
-                    payment_amount,
-                    payment_method,
-                    payment_note,
-                    balance_after
-                )
-                VALUES (%s, %s, %s, %s, %s);
-            """,
-                (cust_id, amount, method, note or None, balance_after),
-            )
-        except Exception as audit_error:
-            print("Warning: payment audit logging failed:", audit_error)
-            cur.execute("ROLLBACK TO SAVEPOINT payment_audit_savepoint;")
-
     def _open_ledger_popup(self, cust_id, company):
+        """
+        Show payment history for a customer.
+        FIX: Queries customer_payments using correct schema columns:
+             payment_date, amount_paid, payment_method (no payment_note or balance_after).
+        """
         lines = []
         try:
             conn = self._connect()
             cur = conn.cursor()
-            cur.execute("SELECT to_regclass('public.customer_payments');")
-            table_name = cur.fetchone()
-
-            if not table_name or table_name[0] is None:
-                lines.append(
-                    "No payment ledger yet. Process a payment to create ledger records."
-                )
-            else:
-                cur.execute(
-                    """
-                    SELECT created_at, payment_amount, payment_method, COALESCE(payment_note, ''), balance_after
-                    FROM customer_payments
-                    WHERE customer_number = %s
-                    ORDER BY created_at DESC
-                    LIMIT 100;
-                """,
-                    (cust_id,),
-                )
-                rows = cur.fetchall()
-                if not rows:
-                    lines.append("No payment records for this customer yet.")
-                else:
-                    for (
-                        created_at,
-                        payment_amount,
-                        payment_method,
-                        payment_note,
-                        balance_after,
-                    ) in rows:
-                        lines.append(
-                            f"{created_at:%Y-%m-%d %H:%M} | -₱{payment_amount:,.2f} | {payment_method} | Bal: ₱{balance_after:,.2f}"
-                        )
-                        if payment_note:
-                            lines.append(f"  Note: {payment_note}")
-
+            cur.execute(
+                """
+                SELECT
+                    payment_date,
+                    amount_paid,
+                    payment_method,
+                    COALESCE(invoice_id::text, 'General Credit') AS invoice_ref
+                FROM customer_payments
+                WHERE customer_number = %s
+                ORDER BY payment_date DESC, payment_id DESC
+                LIMIT 100;
+            """,
+                (cust_id,),
+            )
+            rows = cur.fetchall()
             cur.close()
             conn.close()
+
+            if not rows:
+                lines.append("No payment records for this customer yet.")
+            else:
+                for (payment_date, amount_paid, payment_method, invoice_ref) in rows:
+                    lines.append(
+                        f"{payment_date} | -₱{amount_paid:,.2f} | {payment_method} | Ref: {invoice_ref}"
+                    )
+
         except Exception as e:
             lines = [f"Could not load payment ledger: {e}"]
 
@@ -871,7 +882,7 @@ class CustomersView(ctk.CTkFrame):
     # Edit customer workflow
     # -------------------------
     def edit_customer(self):
-        """Open edit popup for selected row (Edit Customer button)."""
+        """Open edit popup for selected row."""
         selected = self.tree.selection()
         if not selected:
             messagebox.showwarning("Selection", "No customer selected.")
@@ -888,13 +899,17 @@ class CustomersView(ctk.CTkFrame):
         self._open_edit_popup(cust_id)
 
     def _open_edit_popup(self, cust_id):
-        """Popup window to edit customer fields and save changes."""
+        """
+        Popup window to edit customer fields.
+        FIX: Uses customer_name (correct column) instead of contact_name (wrong).
+        """
         try:
             conn = self._connect()
             cur = conn.cursor()
             cur.execute(
                 """
-                SELECT customer_number, company_name, contact_name, phone_number, address, current_balance, is_active
+                SELECT customer_number, company_name, customer_name,
+                       phone_number, address, current_balance, is_active
                 FROM customers
                 WHERE customer_number = %s;
             """,
@@ -926,7 +941,7 @@ class CustomersView(ctk.CTkFrame):
         company_e.pack(fill="x", padx=12, pady=4)
         company_e.insert(0, company or "")
 
-        ctk.CTkLabel(popup, text="Contact", anchor="w").pack(
+        ctk.CTkLabel(popup, text="Contact Name", anchor="w").pack(
             fill="x", padx=12, pady=(8, 4)
         )
         contact_e = ctk.CTkEntry(popup)
@@ -969,9 +984,9 @@ class CustomersView(ctk.CTkFrame):
             new_balance_text = balance_e.get().strip()
             new_active = True if active_var.get() == "Yes" else False
 
-            if not new_company or not new_address:
+            if not new_company or not new_address or not new_contact:
                 messagebox.showwarning(
-                    "Validation", "Company and Address are required."
+                    "Validation", "Company, Contact Name, and Address are required."
                 )
                 return
 
@@ -985,15 +1000,16 @@ class CustomersView(ctk.CTkFrame):
             try:
                 conn = self._connect()
                 cur = conn.cursor()
+                # FIX: Uses customer_name (correct) not contact_name (wrong)
                 cur.execute(
                     """
                     UPDATE customers
-                    SET company_name = %s,
-                        contact_name = %s,
-                        phone_number = %s,
-                        address = %s,
+                    SET company_name     = %s,
+                        customer_name   = %s,
+                        phone_number    = %s,
+                        address         = %s,
                         current_balance = %s,
-                        is_active = %s
+                        is_active       = %s
                     WHERE customer_number = %s;
                 """,
                     (
@@ -1009,7 +1025,7 @@ class CustomersView(ctk.CTkFrame):
                 conn.commit()
                 cur.close()
                 conn.close()
-                messagebox.showinfo("Saved", "Customer updated.")
+                messagebox.showinfo("Saved", "Customer updated successfully.")
                 popup.destroy()
                 self.load_customers()
             except Exception as e:

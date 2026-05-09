@@ -148,7 +148,6 @@ class NationalOfficeApp(ctk.CTk):
         self.current_view.grid(row=0, column=0, sticky="nsew")
         
 
-
 if __name__ == "__main__":
     app = NationalOfficeApp()
     app.mainloop()
