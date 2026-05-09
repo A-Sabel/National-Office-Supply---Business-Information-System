@@ -113,7 +113,6 @@ class NationalOfficeApp(ctk.CTk):
     def logout(self):
         self.destroy()
 
-
 if __name__ == "__main__":
     app = NationalOfficeApp(role="Manager")
     app.mainloop()
