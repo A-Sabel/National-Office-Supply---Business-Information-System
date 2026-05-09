@@ -627,10 +627,11 @@ class _TimecardPanel(ctk.CTkFrame):
 # PayrollView  — top-level tab, matches CustomersView mounting pattern exactly
 # ─────────────────────────────────────────────────────────────────────────────
 class PayrollView(ctk.CTkFrame):
-    def __init__(self, parent, controller, role="Manager"):
+    def __init__(self, parent, controller, role="Manager", db_config=None):
         super().__init__(parent, fg_color="#f8f9fa")
         self.controller = controller
         self.role = role
+        self.db_config = db_config
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(3, weight=1)

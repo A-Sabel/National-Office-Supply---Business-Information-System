@@ -10,6 +10,10 @@ from frontend.tabs.orders_and_invoices import OrdersView
 from frontend.tabs.reports_tab.reports import DBConfig, ReportsHubView
 from frontend.tabs.payroll import PayrollView
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 ctk.set_appearance_mode("light")
 ctk.set_default_color_theme("blue")
 
@@ -23,6 +27,14 @@ class NationalOfficeApp(ctk.CTk):
         self.configure(fg_color="#ffffff")
         self.title("National Office Supplies BIS")
         self.geometry("1200x800")
+
+        self.db_config: DBConfig = {
+            "dbname": os.getenv("DB_NAME", "postgres"),
+            "user": os.getenv("DB_USER", "postgres"),
+            "password": os.getenv("DB_PASS", ""),
+            "host": os.getenv("DB_HOST", "localhost"),
+            "port": int(os.getenv("DB_PORT", 5432)),
+        }
 
         # 1. Setup Grid
         self.grid_columnconfigure(1, weight=1)
@@ -57,7 +69,11 @@ class NationalOfficeApp(ctk.CTk):
         if role is None:
             role = self.role
         self.current_view = DashboardView(
-            self.content_container, self, username=username, role=role
+            self.content_container,
+            self,
+            username=username,
+            role=role,
+            db_config=self.db_config,
         )
         self.current_view.grid(row=0, column=0, sticky="nsew")
 
@@ -65,56 +81,27 @@ class NationalOfficeApp(ctk.CTk):
 
     def show_customers(self):
         self._clear_content()
-        db_config = {
-            "dbname": "nos_customerdb",
-            "user": "postgres",
-            "password": "maomao220",
-            "host": "localhost",
-            "port": 5432,
-        }
-        self.current_view = CustomersView(self.content_container, self, db_config)
+        self.current_view = CustomersView(self.content_container, self, self.db_config)
         self.current_view.grid(row=0, column=0, sticky="nsew")
 
     def show_orders(self):
         self._clear_content()
-        db_config = {
-            "dbname": "databasename_here",  # Update with your actual database name
-            "user": "postgres",
-            "password": "your_password_here",  # Update with your actual password
-            "host": "localhost",
-            "port": 5432,
-        }
         self.current_view = OrdersView(
-            self.content_container, controller=self, db_config=db_config
+            self.content_container, controller=self, db_config=self.db_config
         )
         self.current_view.grid(row=0, column=0, sticky="nsew")
 
     def show_inventory(self):
         self._clear_content()
-        db_config = {
-            "dbname": "nos_stockdb",
-            "user": "postgres",
-            "password": "maomao220",
-            "host": "localhost",
-            "port": 5432,
-        }
         self.current_view = InventoryView(
-            self.content_container, controller=self, db_config=db_config
+            self.content_container, controller=self, db_config=self.db_config
         )
         self.current_view.grid(row=0, column=0, sticky="nsew")
 
     def show_reports(self):
         self._clear_content()
-        # Updated to your nos_stockdb
-        db_config: DBConfig = {
-            "dbname": "nos_stockdb",
-            "user": "postgres",
-            "password": "maomao220",
-            "host": "localhost",
-            "port": 5432,
-        }
         self.current_view = ReportsHubView(
-            self.content_container, controller=self, db_config=db_config
+            self.content_container, controller=self, db_config=self.db_config
         )
         self.current_view.grid(row=0, column=0, sticky="nsew")
 
@@ -123,7 +110,10 @@ class NationalOfficeApp(ctk.CTk):
         print("Navigation: Payroll")
         self._clear_content()
         self.current_view = PayrollView(
-            self.content_container, controller=self, role=self.role
+            self.content_container,
+            controller=self,
+            role=self.role,
+            db_config=self.db_config,
         )
         self.current_view.grid(row=0, column=0, sticky="nsew")
 

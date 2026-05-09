@@ -23,9 +23,13 @@ class MetricCard(ctk.CTkFrame):
         ).pack(side="left", padx=10)
 
         # Value & Subtext
-        ctk.CTkLabel(
+        self.value_label = ctk.CTkLabel(
             self, text=value, font=("Segoe UI", 24, "bold"), text_color="#2c3e50"
-        ).pack(anchor="w", padx=15, pady=(5, 0))
+        )
+        self.value_label.pack(anchor="w", padx=15, pady=(5, 0))
         ctk.CTkLabel(self, text=subtext, font=("Segoe UI", 11), text_color=color).pack(
             anchor="w", padx=15, pady=(0, 15)
         )
+
+    def update_value(self, new_value):
+        self.value_label.configure(text=str(new_value))
