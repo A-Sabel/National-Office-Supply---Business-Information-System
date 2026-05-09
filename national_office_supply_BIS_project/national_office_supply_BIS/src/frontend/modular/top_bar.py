@@ -111,16 +111,21 @@ class TopBar(ctk.CTkFrame):
             self.hide_profile(force=True)
 
     def show_profile(self, pinned=False):
-        self.cancel_profile_timer()
-        if self.profile_popup: self.profile_popup.destroy()
-            
+        if hasattr(self, "profile_popup") and self.profile_popup:
+            self.profile_popup.destroy()
+
+        from frontend.modular.profile_overlay import ProfileOverlay
+        
         self.profile_popup = ProfileOverlay(
-            self.parent, username="Andrea Ysabela", designation="BSCS - 2D", 
-            role=self.role_label.cget("text"), is_pinned=pinned
+            self.parent,
+            controller=self.parent,
+            session=self.parent.session,
+            db_config=self.parent.db_config, # <--- Add this line
+            is_pinned=pinned
         )
-        self.profile_popup.place(relx=1.0, y=55, x=-20, anchor="ne")
-        self.profile_popup.bind("<Enter>", lambda e: self.cancel_profile_timer())
-        self.profile_popup.bind("<Leave>", lambda e: self.start_profile_timer())
+        self.profile_popup.place(relx=0.98, rely=0.12, anchor="ne")
+        if not pinned:
+            self.profile_popup.bind("<Leave>", lambda e: self.hide_profile())
 
     def start_profile_timer(self):
         if not self.profile_pinned:

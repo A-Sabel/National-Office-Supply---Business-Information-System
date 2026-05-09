@@ -20,7 +20,7 @@ Current Code Snapshot:
 - `CustomersView` already supports live balance display, search/filtering, payments, and customer edits.
 - PostgreSQL schema migration has already been executed; the database tables are created.
 - Placeholder reports (still pending): Customer List & Balances, Customer Payment History.
-- `orders_and_invoices.py` exists but is currently empty.
+- `orders_and_invoices.py` is implemented with OrdersView, CreateInvoicePanel, and over-selling guards.
 
 QD Section Prep:
 
@@ -76,9 +76,9 @@ Tasks mapped to: All technical implementation items 1–15
 
 Tasks mapped to: FS-Sec1, FS-Sec2, FS-Sec3, Req 16
 
-- [ ] Implement login validation: Hash password check against `Employees(position, employee_number)`
-- [ ] Extend `__main__.py` session state: Track `current_user`, `user_role` (Manager/Rep/Hourly), `session_start_time`
-- [ ] Create RBAC guard module: `@require_role('Manager')`, `@require_role('Rep')`, etc.
+- [x] Implement login validation: Hash password check against `Employees(position, employee_number)`
+- [x] Extend `__main__.py` session state: Track `current_user`, `user_role` (Manager/Rep/Hourly), `session_start_time`
+- [x] Create RBAC guard module: `@require_role('Manager')`, `@require_role('Rep')`, etc.
 - [x] Update `navigation_bar.py`: Conditionally show/hide tabs based on `current_user.position` (Payroll/Timecards hidden for Reps)
 - [ ] Implement `SessionManager`: Session validation, timeout, role-based view access checks
 - [ ] Add SSN encryption utility: `encrypt_ssn()`, `decrypt_ssn()` (using `cryptography` library or simple AES)
@@ -115,14 +115,14 @@ Tasks mapped to: All existing views (customers, inventory, reports)
 
 Tasks mapped to: Req 2, 3, 11, 13, 15; Technical items 10, 11
 
-- [ ] Implement `OrdersView` in `orders_and_invoices.py`:
-  - [ ] "New Order" form: Customer lookup, part multi-select, qty input, dynamic line item UI
-  - [ ] Over-selling guard: Check `part.stock_count >= line_qty` before allowing confirm (Manager override option)
-  - [ ] Line item management: Add/remove rows, recalculate invoice total on the fly
+- [x] Implement `OrdersView` in `orders_and_invoices.py`:
+  - [x] "New Order" form: Customer lookup, part multi-select, qty input, dynamic line item UI
+  - [x] Over-selling guard: Check `part.stock_count >= line_qty` before allowing confirm (Manager override option)
+  - [x] Line item management: Add/remove rows, recalculate invoice total on the fly
   - [ ] Submit order: Call `InvoiceService.create()` → stores invoice + line items → sets status='pending'
-  - [ ] Invoice list: Display pending/shipped invoices; filter by status
+  - [x] Invoice list: Display pending/shipped invoices; filter by status
   - [ ] Shipment button: Click → `InvoiceService.update_status('shipped')` → triggers `PartService.update_stock()` for each line
-  - [ ] Cancellation: Only allow if status != 'shipped'; sets status='void', removes line items
+  - [x] Cancellation: Only allow if status != 'shipped'; sets status='void', removes line items
 - [ ] Backend order validation:
   - [ ] Quantity must be >= 1
   - [ ] Customer must exist and `is_active = TRUE`
@@ -173,7 +173,7 @@ Tasks mapped to: Req 4, 9; Technical items 3, 4, 7, 9, 12, 13
   - [ ] Optional filter by date range or customer
   - [ ] Display: Customer, Date, Amount, Method, Running Balance
   - [ ] Export to CSV
-- [ ] Enhance Stock Ordering Report (Technical item 3):
+- [x] Enhance Stock Ordering Report (Technical item 3):
   - [ ] Query: `SELECT part_id, part_number, description, stock_count, trigger_amount, on_order FROM Parts WHERE stock_count <= trigger_amount ORDER BY stock_count ASC`
   - [ ] Show parts due for restock with current vs. target levels
   - [ ] Link to supplier cost data (cheapest supplier per part)
@@ -181,7 +181,7 @@ Tasks mapped to: Req 4, 9; Technical items 3, 4, 7, 9, 12, 13
   - [ ] Query suppliers, their parts, and costs
   - [ ] Aggregate total spending per supplier this week/month
   - [ ] Sort by supplier ID and part ID
-- [ ] Implement High-Performance Reps Report (Technical item 12):
+- [x] Implement High-Performance Reps Report (Technical item 12):
   - [ ] Identify reps with > 10 invoices in target week
   - [ ] Show: Rep Name, Invoice Count, Total Sales, Avg Invoice Value
 - [ ] Implement Best Price Procurement (Technical item 13):
@@ -193,10 +193,10 @@ Tasks mapped to: Req 4, 9; Technical items 3, 4, 7, 9, 12, 13
 
 Tasks mapped to: Req 5, 13; Technical items 5, 6, 14
 
-- [ ] Implement critical stock alerts:
-  - [ ] Query: `Parts WHERE stock_count <= 1 AND on_order = FALSE AND part_id IN (SELECT DISTINCT part_id FROM Invoice_Lines WHERE invoice_id IN (SELECT invoice_id FROM Invoices WHERE status = 'pending'))`
-  - [ ] Display as critical alerts in top bar alert dropdown
-  - [ ] Show: Part #, Current Stock, Linked Unshipped Orders count
+- [x] Implement critical stock alerts:
+  - [x] Query: `Parts WHERE stock_count <= 1 AND on_order = FALSE AND part_id IN (SELECT DISTINCT part_id FROM Invoice_Lines WHERE invoice_id IN (SELECT invoice_id FROM Invoices WHERE status = 'pending'))`
+  - [x] Display as critical alerts in top bar alert dropdown
+  - [x] Show: Part #, Current Stock, Linked Unshipped Orders count
 - [ ] Implement inventory bottleneck detection (Technical item 5):
   - [ ] Join `Invoice_Lines`, `Invoices`, `Parts`
   - [ ] Filter: `Invoices.status = 'pending' AND Parts.stock_count <= 1`
@@ -280,15 +280,15 @@ Tasks mapped to: FS-Sec1, FS-Sec2; Safety Nets 1–3
 
 Tasks mapped to: FS-Sec3, FS-Sec5, FS-Sec6
 
-- [ ] Add transaction guards to all writes:
-  - [ ] `@auth_required`, `@role_required('Manager')` decorators on sensitive endpoints
-  - [ ] Re-validate user session before INSERT/UPDATE/DELETE
+- [x] Add transaction guards to all writes:
+  - [x] `@auth_required`, `@role_required('Manager')` decorators on sensitive endpoints
+  - [x] Re-validate user session before INSERT/UPDATE/DELETE
   - [ ] Wrap multi-step operations (e.g., shipment → stock decrement → balance update) in transaction block
 - [ ] Restrict price edits:
   - [ ] `InventoryView` price field: Read-only unless `current_user.position == 'Manager'`
   - [ ] Backend: `PartService.update()` checks role before allowing price change
-- [ ] Restrict worker file access (timecards, payroll):
-  - [ ] `PayrollView`, `PayrollView.timecards_panel`: Hidden for non-Managers
+- [x] Restrict worker file access (timecards, payroll):
+  - [x] `PayrollView`, `PayrollView.timecards_panel`: Hidden for non-Managers
   - [ ] Backend: Query endpoints return 403 if non-Manager requests payroll/timecard data
 - [ ] Form validation guards:
   - [ ] Invoice line qty >= 1 and <= stock_count (unless Manager override)
@@ -405,9 +405,9 @@ Phase 3 requires Phase 2 fully complete; focuses on validation and polish.
 
 ### 4. Critical Stock Check
 
-- [ ] Filter inventory where `stock_count <= 1`
-- [ ] Add condition `on_order = False`
-- [ ] Surface results as critical alerts
+- [x] Filter inventory where `stock_count <= 1`
+- [x] Add condition `on_order = False`
+- [x] Surface results as critical alerts
 - [ ] Validate no false positives for items already on order
 
 ### 5. Inventory Bottleneck
@@ -449,24 +449,24 @@ Phase 3 requires Phase 2 fully complete; focuses on validation and polish.
 
 ### 10. Backlog Tracking
 
-- [ ] Filter `Invoices` where `is_shipped = False`
-- [ ] Expose as backend backlog dataset
-- [ ] Display backlog list in Orders tab
+- [x] Filter `Invoices` where `is_shipped = False`
+- [x] Expose as backend backlog dataset
+- [x] Display backlog list in Orders tab
 - [ ] Generate part-level list of ordered parts not yet shipped (QD-Sec10)
 - [ ] Validate order counts match database
 
 ### 11. Shipment Blockers
 
-- [ ] Add `OrdersView` rule: compare `Part.stock_count` vs `Invoice_Line.quantity`
-- [ ] Flag parts where stock is insufficient
-- [ ] Show blocker reason in order details UI
+- [x] Add `OrdersView` rule: compare `Part.stock_count` vs `Invoice_Line.quantity`
+- [x] Flag parts where stock is insufficient
+- [x] Show blocker reason in order details UI
 - [ ] Validate blockers clear after restock
 
 ### 12. High-Performance Reps
 
-- [ ] Group invoices by rep for target week
-- [ ] Add `HAVING COUNT(invoice_id) > 10`
-- [ ] Return list of high-performance reps
+- [x] Group invoices by rep for target week
+- [x] Add `HAVING COUNT(invoice_id) > 10`
+- [x] Return list of high-performance reps
 - [ ] Validate threshold logic in tests
 
 ### 13. Best Price Procurement
@@ -501,16 +501,16 @@ Phase 3 requires Phase 2 fully complete; focuses on validation and polish.
 
 ### 2. Shipping Status
 
-- [ ] Add `status` enum (`Pending`, `Shipped`) or `shipped_date` to `Invoices`
+- [x] Add `status` enum (`Pending`, `Shipped`) or `shipped_date` to `Invoices`
 - [ ] Update backend when shipment is processed
-- [ ] Display status badge in Orders tab
+- [x] Display status badge in Orders tab
 - [ ] Add test for status transitions
 
 ### 3. Payment Status
 
-- [ ] Add `is_paid` boolean to `Invoices`
+- [x] Add `is_paid` boolean to `Invoices`
 - [ ] Update payment workflow to set `is_paid`
-- [ ] Filter dashboard Total Revenue to paid invoices only
+- [x] Filter dashboard Total Revenue to paid invoices only
 - [ ] Add test for paid-only revenue metric
 
 ### 4. Rep Sales Tracking
@@ -523,8 +523,8 @@ Phase 3 requires Phase 2 fully complete; focuses on validation and polish.
 ### 5. Stock vs. On Order
 
 - [ ] Ensure inventory table stores `stock_count` and `on_order_count`
-- [ ] Add low-stock threshold check in alert/notice logic
-- [ ] Show critical alerts in top bar/alerts UI
+- [x] Add low-stock threshold check in alert/notice logic
+- [x] Show critical alerts in top bar/alerts UI
 - [ ] Add test for low-stock alert trigger
 
 ### 6. Weekly Timecards
@@ -566,7 +566,7 @@ Phase 3 requires Phase 2 fully complete; focuses on validation and polish.
 
 - [ ] Create one-to-many relationship: `Invoices` -> `InvoiceLineItems`
 - [ ] Add backend methods for line item add/update/remove
-- [ ] Build dynamic multi-part line item UI in order/invoice flow
+- [x] Build dynamic multi-part line item UI in order/invoice flow
 - [ ] Add test for invoice totals from multiple line items
 
 ### 12. Sales Commission
@@ -593,7 +593,7 @@ Phase 3 requires Phase 2 fully complete; focuses on validation and polish.
 ### 15. Customer Details
 
 - [x] Ensure `Customers` includes `customer_number`, `company_name`, `address`
-- [ ] Populate invoice header fields when customer is selected
+- [x] Populate invoice header fields when customer is selected
 - [ ] Validate customer lookup/autocomplete flow in invoice UI
 - [ ] Add test for invoice header auto-population
 
@@ -617,11 +617,11 @@ Phase 3 requires Phase 2 fully complete; focuses on validation and polish.
 
 ### FS-Sec1: Security and Access Control
 
-- [ ] Create login view module for credential validation against `Employees`
-- [ ] Restrict worker file access (timecards, payroll) to managers only (FS-Sec1)
-- [ ] Enforce RBAC checks before opening restricted tabs (Manager-only views)
-- [ ] Show Access Denied alert when non-manager requests restricted actions
-- [ ] Re-validate active session permissions before every sensitive `INSERT`/`UPDATE`
+- [x] Create login view module for credential validation against `Employees`
+- [x] Restrict worker file access (timecards, payroll) to managers only (FS-Sec1)
+- [x] Enforce RBAC checks before opening restricted tabs (Manager-only views)
+- [x] Show Access Denied alert when non-manager requests restricted actions
+- [x] Re-validate active session permissions before every sensitive `INSERT`/`UPDATE`
 - [ ] Add tests for manager and non-manager access paths
 
 ### FS-Sec2: Automated Identifiers
@@ -633,9 +633,9 @@ Phase 3 requires Phase 2 fully complete; focuses on validation and polish.
 
 ### FS-Sec3-FS-Sec5: Transactional Interface and Form Engine
 
-- [ ] Build New Order form flow in Orders tab (placement and cancellation)
-- [ ] Use entry components for editable text fields (address, descriptions)
-- [ ] Use dropdown/combobox components for existing customer/supplier selection
+- [x] Build New Order form flow in Orders tab (placement and cancellation)
+- [x] Use entry components for editable text fields (address, descriptions)
+- [x] Use dropdown/combobox components for existing customer/supplier selection
 - [ ] Add modification workflow for transactional records
 - [ ] Restrict price-edit controls in Inventory tab to Manager role only
 - [x] Enable customer profile modification (FS-Sec5): company name, address, contact info
@@ -644,8 +644,8 @@ Phase 3 requires Phase 2 fully complete; focuses on validation and polish.
 ### FS-Sec6: Real-time Critical Alerts
 
 - [ ] Run stock check function whenever an order is placed/updated
-- [ ] Trigger critical notice when `current_stock <= critical_level`
-- [ ] Ensure bell icon/banner updates from alert state
+- [x] Trigger critical notice when `current_stock <= critical_level`
+- [x] Ensure bell icon/banner updates from alert state
 - [ ] Add test for critical alert trigger and display timing
 
 ### FS-Sec7: Report Generation Views
@@ -705,7 +705,7 @@ Phase 3 requires Phase 2 fully complete; focuses on validation and polish.
 
 These are the authoritative business rules to implement in backend controllers, DB constraints, and UI guards. Each item is checkable so you can mark when the behavior is fully implemented and tested.
 
-1. Inventory & Procurement Logic
+Inventory & Procurement Logic
 
 - [x] Restock Trigger: Flag part for restocking when `stock_count <= trigger_amount` (FS-Sec6)
 - [x] Critical Restock Priority: If `stock_count` in (0,1) AND `on_order = FALSE` AND part appears in an unshipped invoice (status = 'active'), mark as critical priority (QD-Sec5)
@@ -716,14 +716,14 @@ These are the authoritative business rules to implement in backend controllers, 
   - [x] If part not ordered this year → apply price inflation based on `restock_value` (10% if <4, 20% if >=4)
   - [x] Double `restock_value` for the two highest-selling parts of the year (QD-Sec14)
 
-1. Employee & Payroll Logic
+Employee & Payroll Logic
 
 - [x] Hourly Compensation: Gross = `hours_worked * hourly_wage` (timecards required weekly)
 - [ ] Timecard Missing Definition: Missing if no `timecards` record for `week_date` and `employee.is_active = TRUE` and employee is hourly; payroll audit runs Monday for prior week
 - [x] Sales Rep Commission: 5% commission on each invoice's `total_amount` for rep-written invoices that week
 - [ ] YTD Sales Tracking: Maintain `ytdsales` as cumulative year-to-date gross sales; reset to 0.00 at fiscal year start
 
-1. Sales, Invoicing & Account Balances
+Sales, Invoicing & Account Balances
 
 - [ ] Invoice Totals: `invoice.total_amount = SUM(invoice_lines.quantity_ordered * parts.selling_price)` (calculated dynamically)
 - [ ] Over-selling Prevention: Block creation of `invoice_line` where `quantity_ordered > part.stock_count` unless Manager override
@@ -734,7 +734,7 @@ These are the authoritative business rules to implement in backend controllers, 
 - [ ] Customer Balance Updates: Increase `current_balance` when invoice is shipped; decrease when payments logged
 - [ ] Customer Deletion Rule: Do not allow deletion if customer has invoices; set `is_active = FALSE` to close account
 
-1. System, Security & Reporting Rules
+System, Security & Reporting Rules
 
 - [x] Automated Identifiers: All primary keys use `SERIAL`/`BIGSERIAL` sequences
 - [x] RBAC: Internal employees and reps may place/cancel orders; only Managers can view/modify worker files or approve stock overrides

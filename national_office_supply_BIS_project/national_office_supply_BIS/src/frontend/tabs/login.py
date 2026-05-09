@@ -165,25 +165,25 @@ class LoginView(ctk.CTkFrame):
 
         # --- 2. MOCK CREDENTIALS FALLBACK (Testing Mode) ---
         print(f"[AUTH] Checking mock credentials for '{username}'...")
+        
         if username == "manager" and password == "admin123":
             return {
                 "employee_number": 1,
-                "employee_name": "MANAGER test",
+                "employee_name": "Maria Santos",
                 "position": "Manager",
             }
         elif username == "rep" and password == "sales123":
             return {
-                "employee_number": 2,
-                "employee_name": "John Doe",
+                "employee_number": 4,
+                "employee_name": "Kevin Lim",
                 "position": "Sales Rep",
             }
         elif username == "hourly" and password == "worker123":
             return {
-                "employee_number": 3,
-                "employee_name": "Jane Smith",
+                "employee_number": 16,
+                "employee_name": "Mark Aquino",
                 "position": "Hourly",
             }
-
         return None
 
     def handle_password_change(self):
