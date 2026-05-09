@@ -6,6 +6,7 @@ from frontend.modular.top_bar import TopBar
 from frontend.tabs.dashboard import DashboardView
 from frontend.tabs.customers import CustomersView
 from frontend.tabs.inventory import InventoryView
+from frontend.tabs.orders_and_invoices import OrdersView
 from frontend.tabs.reports_tab.reports import DBConfig, ReportsHubView
 
 ctk.set_appearance_mode("light")
@@ -75,7 +76,6 @@ class NationalOfficeApp(ctk.CTk):
 
     def show_orders(self):
         self._clear_content()
-        from frontend.tabs.orders_and_invoices import OrdersView
         db_config = {
             "dbname": "databasename_here",  # Update with your actual database name
             "user": "postgres",
