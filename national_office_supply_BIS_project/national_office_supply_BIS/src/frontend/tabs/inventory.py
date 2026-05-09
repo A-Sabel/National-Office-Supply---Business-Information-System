@@ -148,7 +148,7 @@ class InventoryView(ctk.CTkFrame):
         self.left_panel = ctk.CTkFrame(self, fg_color="transparent")
         self.left_panel.grid(row=0, column=0, sticky="nsew", padx=20, pady=20)
         self.left_panel.columnconfigure(0, weight=1)
-        self.left_panel.rowconfigure(1, weight=1)
+        self.left_panel.rowconfigure(1, weight=0)
 
         # KPI Bar
         kpi = InventoryKPIBar(self.left_panel, self._parts_rows)
