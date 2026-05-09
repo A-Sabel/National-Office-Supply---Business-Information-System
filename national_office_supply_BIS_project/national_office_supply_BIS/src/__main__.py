@@ -74,7 +74,19 @@ class NationalOfficeApp(ctk.CTk):
         self.current_view.grid(row=0, column=0, sticky="nsew")
 
     def show_orders(self):
-        print("Navigation: Orders")
+        self._clear_content()
+        from frontend.tabs.orders_and_invoices import OrdersView
+        db_config = {
+            "dbname": "databasename_here",  # Update with your actual database name
+            "user": "postgres",
+            "password": "your_password_here",  # Update with your actual password
+            "host": "localhost",
+            "port": 5432,
+        }
+        self.current_view = OrdersView(
+            self.content_container, controller=self, db_config=db_config
+        )
+        self.current_view.grid(row=0, column=0, sticky="nsew")
 
     def show_inventory(self):
         self._clear_content()
