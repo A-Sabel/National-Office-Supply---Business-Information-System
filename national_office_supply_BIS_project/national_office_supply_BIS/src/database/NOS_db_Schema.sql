@@ -239,3 +239,15 @@ CREATE INDEX idx_employee_payments_date  ON employee_payments(date_paid);
 -- Speed up PO lookups by part/supplier
 CREATE INDEX idx_po_part            ON purchase_orders(part_number);
 CREATE INDEX idx_po_supplier        ON purchase_orders(supplier_id);
+
+
+-- Run this in your PostgreSQL database
+CREATE OR REPLACE VIEW secure_employee_directory AS 
+SELECT 
+    employee_number, 
+    employee_name, 
+    position, 
+    ytdsales, 
+    commission_rate,
+    is_active
+FROM employees;

@@ -13,5 +13,7 @@ python-dotenv==1.0.1
 # --- Data Generation ---
 faker==40.15.0
 
+bcrypt==5.0.0
+
 # --- Linting & Development (Optional but recommended) ---
 black          # Code formatter for team consistency

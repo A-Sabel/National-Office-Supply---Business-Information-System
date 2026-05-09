@@ -54,14 +54,14 @@ Tasks mapped to: Req 1, 2, 3, 10, 14, 16, 17
 - [x] Execute SQL migration: Create `Logs` table (`log_id`, `actor_id`, `action_type`, `target_table`, `target_id`, `timestamp`, `details`)
 - [x] Add constraints: `NOT NULL`, `CHECK (quantity >= 0)`, `CHECK (price >= 0)`, currency fields as `NUMERIC(10,2)`
 - [x] Add indices: `Invoices(customer_id)`, `Invoices(rep_id)`, `Parts(stock_count)`, `Timecards(employee_id, week_date)`
-- [ ] Seed test data: check Document in gdocs
-- [ ] **Deliverable:** Full schema with constraints, indices, and test data; database ready for queries
+- [x] Seed test data: check Document in gdocs
+- [x] **Deliverable:** Full schema with constraints, indices, and test data; database ready for queries
 
 #### 1B. Backend Service Layer (Week 1, Days 3–5) — **PRIORITY: HIGH**
 
 Tasks mapped to: All technical implementation items 1–15
 
-- [ ] Create `backend/database_service.py`: Centralized DB connection management (psycopg2 pool or single connection wrapper)
+- [x] Update `backend/database.py`: Centralized DB connection management (psycopg2 pool or single connection wrapper)
 - [ ] Implement `CustomerService`: `get_all()`, `get_by_id()`, `create()`, `update()`, `update_balance()`, `delete()` (soft delete with `is_active = FALSE`)
 - [ ] Implement `PartService`: `get_all()`, `get_by_id()`, `create()`, `update()`, `get_low_stock()`, `update_stock()`, `get_supplier_cost()`
 - [ ] Implement `EmployeeService`: `get_all()`, `get_by_id()`, `get_hourly_staff()`, `get_active_staff()`
@@ -349,7 +349,7 @@ Tasks mapped to: All 17 requirements + FS-Sec items; Delivery readiness
 
 ## Phase Dependency Map
 
-```
+```text
 Phase 1 (Weeks 1–2)          Phase 2 (Weeks 3–4)          Phase 3 (Weeks 5–6)
 ├─ Database Schema      →     ├─ Orders & Invoices   →     ├─ Unit/Integration Tests
 ├─ Service Layer        →     ├─ Payroll & Timecards →     ├─ Audit Logging
@@ -707,23 +707,23 @@ These are the authoritative business rules to implement in backend controllers, 
 
 1. Inventory & Procurement Logic
 
-- [ ] Restock Trigger: Flag part for restocking when `stock_count <= trigger_amount` (FS-Sec6)
-- [ ] Critical Restock Priority: If `stock_count` in (0,1) AND `on_order = FALSE` AND part appears in an unshipped invoice (status = 'active'), mark as critical priority (QD-Sec5)
+- [x] Restock Trigger: Flag part for restocking when `stock_count <= trigger_amount` (FS-Sec6)
+- [x] Critical Restock Priority: If `stock_count` in (0,1) AND `on_order = FALSE` AND part appears in an unshipped invoice (status = 'active'), mark as critical priority (QD-Sec5)
 - [ ] Prevent Duplicate Orders: Verify `on_order = FALSE` before creating a restock PO
 - [ ] Receiving POs: When PO `received = TRUE`, increment `Parts.stock_count` by `quantity_ordered` and set `on_order = FALSE`
-- [ ] Lowest Cost Sourcing: Recommend supplier with lowest `cost` from `Part_Suppliers` when creating restock reports
+- [x] Lowest Cost Sourcing: Recommend supplier with lowest `cost` from `Part_Suppliers` when creating restock reports
 - [ ] Dynamic Inventory Valuation:
-  - [ ] If part not ordered this year → apply price inflation based on `restock_value` (10% if <4, 20% if >=4)
-  - [ ] Double `restock_value` for the two highest-selling parts of the year (QD-Sec14)
+  - [x] If part not ordered this year → apply price inflation based on `restock_value` (10% if <4, 20% if >=4)
+  - [x] Double `restock_value` for the two highest-selling parts of the year (QD-Sec14)
 
-2. Employee & Payroll Logic
+1. Employee & Payroll Logic
 
-- [ ] Hourly Compensation: Gross = `hours_worked * hourly_wage` (timecards required weekly)
+- [x] Hourly Compensation: Gross = `hours_worked * hourly_wage` (timecards required weekly)
 - [ ] Timecard Missing Definition: Missing if no `timecards` record for `week_date` and `employee.is_active = TRUE` and employee is hourly; payroll audit runs Monday for prior week
-- [ ] Sales Rep Commission: 5% commission on each invoice's `total_amount` for rep-written invoices that week
+- [x] Sales Rep Commission: 5% commission on each invoice's `total_amount` for rep-written invoices that week
 - [ ] YTD Sales Tracking: Maintain `ytdsales` as cumulative year-to-date gross sales; reset to 0.00 at fiscal year start
 
-3. Sales, Invoicing & Account Balances
+1. Sales, Invoicing & Account Balances
 
 - [ ] Invoice Totals: `invoice.total_amount = SUM(invoice_lines.quantity_ordered * parts.selling_price)` (calculated dynamically)
 - [ ] Over-selling Prevention: Block creation of `invoice_line` where `quantity_ordered > part.stock_count` unless Manager override
@@ -734,12 +734,12 @@ These are the authoritative business rules to implement in backend controllers, 
 - [ ] Customer Balance Updates: Increase `current_balance` when invoice is shipped; decrease when payments logged
 - [ ] Customer Deletion Rule: Do not allow deletion if customer has invoices; set `is_active = FALSE` to close account
 
-4. System, Security & Reporting Rules
+1. System, Security & Reporting Rules
 
-- [ ] Automated Identifiers: All primary keys use `SERIAL`/`BIGSERIAL` sequences
-- [ ] RBAC: Internal employees and reps may place/cancel orders; only Managers can view/modify worker files or approve stock overrides
+- [x] Automated Identifiers: All primary keys use `SERIAL`/`BIGSERIAL` sequences
+- [x] RBAC: Internal employees and reps may place/cancel orders; only Managers can view/modify worker files or approve stock overrides
 - [ ] Audit Trail: Log user, action, target, and timestamp for sensitive changes (wages, prices, SSNs, payroll issuance)
-- [ ] Data Integrity Constraints: Quantities >= 0; currency fields use `NUMERIC(10,2)`
+- [x] Data Integrity Constraints: Quantities >= 0; currency fields use `NUMERIC(10,2)`
 - [ ] Legacy Export: Weekly YTD sales report exports read-only to `.DBF` format (QD-Sec9)
 - [ ] Secure SALESREP View: Provide a view exposing only `employee_number`, `name`, `ytdsales`, `commission_rate` (exclude SSN, hourly_wage)
 

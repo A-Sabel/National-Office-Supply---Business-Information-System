@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 import tkinter as tk
 import customtkinter as ctk
 from PIL import Image, ImageColor
@@ -22,14 +23,17 @@ class NavigationSidebar(ctk.CTkFrame):
         self._button_meta: dict[str, ButtonMeta] = {}
         self.pack_propagate(False)
 
-        # Base path for your icons
-        self.icon_dir = r"national_office_supply_BIS_project\national_office_supply_BIS\src\assets\icons"
+        # --- PATH RESOLUTION FIX ---
+        # Dynamically finds the assets folder based on this file's actual location
+        current_dir = Path(__file__).parent.resolve()
+        assets_dir = current_dir.parent.parent / "assets"
+        self.icon_dir = assets_dir / "icons"
+        logo_path = assets_dir / "logo3.png"
 
         # --- 1. TOP BAR (Toggle Button + Logo) ---
         self.top_frame = ctk.CTkFrame(self, fg_color="transparent")
         self.top_frame.pack(fill="x", pady=(10, 20), padx=10)
 
-        # The Toggle/Hamburger Button
         self.toggle_btn = ctk.CTkButton(
             self.top_frame,
             text="☰",
@@ -42,9 +46,7 @@ class NavigationSidebar(ctk.CTkFrame):
         )
         self.toggle_btn.pack(side="left")
 
-        # Logo Placement
         try:
-            logo_path = r"national_office_supply_BIS_project\national_office_supply_BIS\src\assets\logo3.png"
             self.logo_image = ctk.CTkImage(
                 light_image=Image.open(logo_path),
                 dark_image=Image.open(logo_path),
@@ -70,7 +72,7 @@ class NavigationSidebar(ctk.CTkFrame):
                 "file": "layout-dashboard.png",
                 "emoji": "🏠",
                 "cmd": self.controller.show_dashboard,
-                "roles": ["Manager", "Sales Rep"],
+                "roles": ["Manager", "Sales Rep", "Hourly"],
             },
             {
                 "name": "Customers",
@@ -98,7 +100,7 @@ class NavigationSidebar(ctk.CTkFrame):
                 "file": "banknote.png",
                 "emoji": "💵",
                 "cmd": self.controller.show_payroll,
-                "roles": ["Manager"],
+                "roles": ["Manager", "Sales Rep", "Hourly"],
             },
             {
                 "name": "Reports",
@@ -113,8 +115,8 @@ class NavigationSidebar(ctk.CTkFrame):
             if self.role in item["roles"]:
 
                 # Dynamically generate the Gray and White versions of the icon
-                icon_inactive = self._load_colored_icon(item["file"], "#aeb9c4")  # Gray
-                icon_active = self._load_colored_icon(item["file"], "#ffffff")  # White
+                icon_inactive = self._load_colored_icon(item["file"], "#aeb9c4")  
+                icon_active = self._load_colored_icon(item["file"], "#ffffff")  
 
                 if icon_inactive:
                     btn_text = f"   {item['name']}"
@@ -140,7 +142,6 @@ class NavigationSidebar(ctk.CTkFrame):
                 )
                 btn.pack(fill="x", padx=10, pady=2)
 
-                # Store references
                 self._button_meta[item["name"]] = {
                     "full_text": btn_text,
                     "icon_only": icon_only_text,
@@ -164,15 +165,19 @@ class NavigationSidebar(ctk.CTkFrame):
         self.logout_btn.pack(side="bottom", fill="x", pady=20, padx=10)
         self._logout_full_text = "  🚪   Logout"
         self._logout_icon_only = "  🚪"
+        
+        # Set default active tab visually
+        if "Dashboard" in self.buttons:
+            self.highlight_tab("Dashboard")
 
     # ==========================================
-    # HELPER METHODS (Notice the indentation here)
+    # HELPER METHODS
     # ==========================================
 
     def _load_colored_icon(self, filename, hex_color):
         """Loads a transparent PNG and overlays a specific hex color onto it."""
-        full_path = os.path.join(self.icon_dir, filename)
-        if not os.path.exists(full_path):
+        full_path = self.icon_dir / filename
+        if not full_path.exists():
             return None
 
         try:
@@ -221,16 +226,14 @@ class NavigationSidebar(ctk.CTkFrame):
             self.configure(width=65)
             self.logo_label.pack_forget()
 
-            for btn in self.buttons.values():
+            # --- TOGGLE FIX: Cleaned up reverse-lookup ---
+            for name, btn in self.buttons.items():
                 btn.configure(
-                    text=self._button_meta[
-                        [name for name, value in self.buttons.items() if value is btn][
-                            0
-                        ]
-                    ]["icon_only"],
+                    text=self._button_meta[name]["icon_only"],
                     width=45,
                     anchor="center",
                 )
+            
             self.logout_btn.configure(
                 text=self._logout_icon_only, width=45, anchor="center"
             )
@@ -244,6 +247,7 @@ class NavigationSidebar(ctk.CTkFrame):
                 btn.configure(
                     text=self._button_meta[name]["full_text"], width=180, anchor="w"
                 )
+                
             self.logout_btn.configure(
                 text=self._logout_full_text, width=180, anchor="w"
             )
