@@ -1,5 +1,5 @@
 """
-orders_and_invoices.py  –  Tab 3: Orders & Invoices
+orders_and_invoices.py    Tab 3: Orders & Invoices
 National Office Supplies BIS
 ──────────────────────────────────────
 Drop this file in:  frontend/tabs/orders_and_invoices.py
