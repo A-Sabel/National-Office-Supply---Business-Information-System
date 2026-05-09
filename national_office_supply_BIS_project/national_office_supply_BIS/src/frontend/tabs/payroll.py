@@ -50,6 +50,7 @@ class _WorkerFilesPanel(ctk.CTkFrame):
         self.grid_rowconfigure(1, weight=1)
         self._revealed = {}
         self._search_var = ctk.StringVar()
+        self._content_visible = True
 
         # header row
         hdr = ctk.CTkFrame(self, fg_color="transparent")
@@ -91,6 +92,19 @@ class _WorkerFilesPanel(ctk.CTkFrame):
             command=self._filter,
         ).pack(side="left")
 
+        self._toggle_btn = ctk.CTkButton(
+            hdr,
+            text="▼",
+            width=24,
+            height=24,
+            corner_radius=4,
+            fg_color="transparent",
+            text_color="#7f8c8d",
+            font=("Segoe UI", 12, "bold"),
+            command=self._toggle_content,
+        )
+        self._toggle_btn.grid(row=0, column=2, sticky="e")
+
         # table card
         card = ctk.CTkFrame(
             self,
@@ -102,6 +116,7 @@ class _WorkerFilesPanel(ctk.CTkFrame):
         card.grid(row=1, column=0, sticky="nsew")
         card.grid_columnconfigure(0, weight=1)
         card.grid_rowconfigure(0, weight=1)
+        self._card = card
 
         style = ttk.Style()
         style.theme_use("clam")
@@ -173,6 +188,16 @@ class _WorkerFilesPanel(ctk.CTkFrame):
 
         self._load(self.SAMPLE)
 
+    def _toggle_content(self):
+        if self._content_visible:
+            self._card.grid_remove()
+            self._toggle_btn.configure(text="▶")
+            self._content_visible = False
+        else:
+            self._card.grid()
+            self._toggle_btn.configure(text="▼")
+            self._content_visible = True
+
     def _load(self, rows):
         for iid in self.tree.get_children():
             self.tree.delete(iid)
@@ -218,6 +243,7 @@ class _AuditPanel(ctk.CTkFrame):
         super().__init__(parent, fg_color="transparent")
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(1, weight=1)
+        self._content_visible = True
 
         today = date.today()
         mon = today - timedelta(days=today.weekday())
@@ -246,12 +272,26 @@ class _AuditPanel(ctk.CTkFrame):
             brow, text=week_str, font=("Segoe UI", 11), text_color="#7f8c8d"
         ).pack(side="right")
 
+        self._toggle_btn = ctk.CTkButton(
+            brow,
+            text="▼",
+            width=24,
+            height=24,
+            corner_radius=4,
+            fg_color="transparent",
+            text_color="#7f8c8d",
+            font=("Segoe UI", 12, "bold"),
+            command=self._toggle_content,
+        )
+        self._toggle_btn.pack(side="right", padx=(0, 8))
+
         # two-column body
         body = ctk.CTkFrame(self, fg_color="transparent")
         body.grid(row=1, column=0, sticky="nsew")
         body.grid_columnconfigure(0, weight=1)
         body.grid_columnconfigure(1, weight=0)
         body.grid_rowconfigure(0, weight=1)
+        self._body = body
 
         # LEFT – missing timecards
         left_card = ctk.CTkFrame(
@@ -375,6 +415,16 @@ class _AuditPanel(ctk.CTkFrame):
             command=lambda: None,
         ).pack(fill="x", padx=14, pady=(0, 14))
 
+    def _toggle_content(self):
+        if self._content_visible:
+            self._body.grid_remove()
+            self._toggle_btn.configure(text="▶")
+            self._content_visible = False
+        else:
+            self._body.grid()
+            self._toggle_btn.configure(text="▼")
+            self._content_visible = True
+
     def _process(self):
         self._proc_btn.configure(
             text="Payroll Processed", fg_color="#1a7a40", state="disabled"
@@ -396,6 +446,29 @@ class _TimecardPanel(ctk.CTkFrame):
         super().__init__(parent, fg_color="transparent")
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(1, weight=1)
+        self._content_visible = True
+
+        top = ctk.CTkFrame(self, fg_color="transparent")
+        top.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+        top.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(
+            top,
+            text="Timecard Entry",
+            font=("Segoe UI", 16, "bold"),
+            text_color="#2c3e50",
+        ).grid(row=0, column=0, sticky="w")
+        self._toggle_btn = ctk.CTkButton(
+            top,
+            text="▼",
+            width=24,
+            height=24,
+            corner_radius=4,
+            fg_color="transparent",
+            text_color="#7f8c8d",
+            font=("Segoe UI", 12, "bold"),
+            command=self._toggle_content,
+        )
+        self._toggle_btn.grid(row=0, column=1, sticky="e")
 
         # submit form
         form = ctk.CTkFrame(
@@ -476,6 +549,8 @@ class _TimecardPanel(ctk.CTkFrame):
         hist.grid(row=1, column=0, sticky="nsew")
         hist.grid_columnconfigure(0, weight=1)
         hist.grid_rowconfigure(1, weight=1)
+        self._form = form
+        self._hist = hist
 
         ctk.CTkLabel(
             hist,
@@ -528,6 +603,18 @@ class _TimecardPanel(ctk.CTkFrame):
         self._ht.configure(yscrollcommand=vsb.set)
         vsb.grid(row=1, column=1, sticky="ns", pady=(0, 10))
         self._ht.grid(row=1, column=0, sticky="nsew", padx=(10, 0), pady=(0, 10))
+
+    def _toggle_content(self):
+        if self._content_visible:
+            self._form.grid_remove()
+            self._hist.grid_remove()
+            self._toggle_btn.configure(text="▶")
+            self._content_visible = False
+        else:
+            self._form.grid()
+            self._hist.grid()
+            self._toggle_btn.configure(text="▼")
+            self._content_visible = True
 
     def _submit(self):
         hrs = self._hours.get().strip()
