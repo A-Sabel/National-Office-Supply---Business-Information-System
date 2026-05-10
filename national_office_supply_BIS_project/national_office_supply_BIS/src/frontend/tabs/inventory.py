@@ -124,6 +124,8 @@ class InventoryView(ctk.CTkFrame):
 
         self._build_place_order_card()
         self._build_receive_restock_card()
+        self._build_bottleneck_card()
+        self._build_admin_actions_card()
 
     def _load_parts_data(self):
         import psycopg2
@@ -410,6 +412,186 @@ class InventoryView(ctk.CTkFrame):
 
         if self.role != "Manager":
             self.mark_rcvd_btn.configure(state="disabled", fg_color="#bdc3c7", text_color="#7f8c8d")
+
+    def _build_bottleneck_card(self):
+        card = self._create_card_container(self.right_panel)
+        card.pack(fill="x", pady=(0, 8))
+
+        hdr = ctk.CTkFrame(card, fg_color="transparent")
+        hdr.pack(fill="x", padx=10, pady=(8, 4))
+        ctk.CTkLabel(hdr, text="⚠ Order Bottlenecks", font=FONT_SECTION, text_color=ACCENT_RED).pack(side="left")
+        ctk.CTkButton(
+            hdr, text="↻", width=28, height=28, corner_radius=6,
+            fg_color="#f5f7fa", hover_color="#e8ecf2", text_color=TEXT_DARK,
+            command=self._refresh_bottlenecks
+        ).pack(side="right")
+
+        self._bottleneck_frame = ctk.CTkFrame(card, fg_color="transparent")
+        self._bottleneck_frame.pack(fill="x", padx=10, pady=(0, 8))
+        self._refresh_bottlenecks()
+
+    def _refresh_bottlenecks(self):
+        import psycopg2
+        import psycopg2.extras
+
+        for w in self._bottleneck_frame.winfo_children():
+            w.destroy()
+
+        try:
+            conn = psycopg2.connect(**self.db_config)
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute("""
+                SELECT
+                    p.part_number,
+                    p.description,
+                    p.stock_count,
+                    COUNT(DISTINCT i.invoice_id) AS blocked_order_count
+                FROM parts p
+                JOIN invoice_lines il ON il.part_number = p.part_number
+                JOIN invoices i ON i.invoice_id = il.invoice_id
+                WHERE i.status = 'pending'
+                AND p.stock_count <= 1
+                AND p.on_order = FALSE
+                GROUP BY p.part_number, p.description, p.stock_count
+                ORDER BY p.stock_count ASC
+            """)
+            bottlenecks = cur.fetchall()
+            cur.close()
+            conn.close()
+        except Exception as e:
+            ctk.CTkLabel(self._bottleneck_frame, text=f"DB Error: {e}", text_color=ACCENT_RED, font=FONT_SMALL).pack()
+            return
+
+        if not bottlenecks:
+            ctk.CTkLabel(self._bottleneck_frame, text="✓ No bottlenecks detected", font=FONT_SMALL, text_color=ACCENT_GREEN).pack(anchor="w")
+            return
+
+        for b in bottlenecks:
+            row = ctk.CTkFrame(self._bottleneck_frame, fg_color="#fff5f5", corner_radius=6)
+            row.pack(fill="x", pady=(0, 4))
+            ctk.CTkLabel(row, text=f"Part {b['part_number']} — {b['description'][:28]}", font=("Segoe UI", 10, "bold"), text_color=ACCENT_RED).pack(anchor="w", padx=8, pady=(4, 0))
+            ctk.CTkLabel(row, text=f"Stock: {b['stock_count']}  |  Blocking {b['blocked_order_count']} order(s)", font=FONT_SMALL, text_color=TEXT_MUTED).pack(anchor="w", padx=8, pady=(0, 4))
+
+    def _build_admin_actions_card(self):
+        card = self._create_card_container(self.right_panel)
+        card.pack(fill="x", pady=(0, 8))
+
+        ctk.CTkLabel(card, text="Admin Actions", font=FONT_SECTION, text_color=TEXT_DARK).pack(anchor="w", padx=10, pady=(8, 6))
+
+        self.restock_btn = ctk.CTkButton(
+            card, text="⟳ Apply Dynamic Restock", height=32, corner_radius=6,
+            fg_color=ACCENT_AMBER, hover_color="#d68910", text_color="#ffffff",
+            font=("Segoe UI", 11, "bold"), command=self.handle_apply_dynamic_restock
+        )
+        self.restock_btn.pack(fill="x", padx=10, pady=(0, 6))
+
+        self.inflate_btn = ctk.CTkButton(
+            card, text="↑ Apply Price Inflation", height=32, corner_radius=6,
+            fg_color=ACCENT_RED, hover_color="#c0392b", text_color="#ffffff",
+            font=("Segoe UI", 11, "bold"), command=self.handle_apply_price_inflation
+        )
+        self.inflate_btn.pack(fill="x", padx=10, pady=(0, 8))
+
+        if self.role != "Manager":
+            for btn in (self.restock_btn, self.inflate_btn):
+                btn.configure(state="disabled", fg_color="#bdc3c7", text_color="#7f8c8d")
+
+    def handle_apply_dynamic_restock(self):
+        import psycopg2
+
+        try:
+            conn = psycopg2.connect(**self.db_config)
+            cur = conn.cursor()
+
+            # Find top 2 parts by total quantity sold YTD
+            cur.execute("""
+                SELECT il.part_number, SUM(il.quantity_ordered) AS ytd_qty
+                FROM invoice_lines il
+                JOIN invoices i ON i.invoice_id = il.invoice_id
+                WHERE EXTRACT(YEAR FROM i.invoice_date) = EXTRACT(YEAR FROM CURRENT_DATE)
+                AND i.status != 'void'
+                GROUP BY il.part_number
+                ORDER BY ytd_qty DESC
+                LIMIT 2
+            """)
+            top_parts = [row[0] for row in cur.fetchall()]
+
+            if not top_parts:
+                messagebox.showinfo("Dynamic Restock", "No YTD sales data found. Nothing updated.")
+                conn.close()
+                return
+
+            cur.execute("""
+                UPDATE parts
+                SET restock_value = restock_value * 2
+                WHERE part_number = ANY(%s)
+            """, (top_parts,))
+
+            conn.commit()
+            cur.close()
+            conn.close()
+
+            messagebox.showinfo("Dynamic Restock", f"Restock value doubled for {len(top_parts)} part(s):\n" + "\n".join(str(p) for p in top_parts))
+            self._load_parts_data()
+            self._refresh_parts_table_page()
+
+        except Exception as e:
+            messagebox.showerror("DB Error", f"Failed to apply dynamic restock:\n{e}")
+
+    def handle_apply_price_inflation(self):
+        import psycopg2
+
+        confirm = messagebox.askyesno(
+            "Confirm Price Inflation",
+            "Increase prices for all parts with no YTD sales?\n\n"
+            "• restock_value < 4  →  +10%\n"
+            "• restock_value ≥ 4  →  +20%\n\nContinue?"
+        )
+        if not confirm:
+            return
+
+        try:
+            conn = psycopg2.connect(**self.db_config)
+            cur = conn.cursor()
+
+            # Fetch parts with zero YTD sales
+            cur.execute("""
+                SELECT p.part_number, p.restock_value
+                FROM parts p
+                WHERE p.part_number NOT IN (
+                    SELECT DISTINCT il.part_number
+                    FROM invoice_lines il
+                    JOIN invoices i ON i.invoice_id = il.invoice_id
+                    WHERE EXTRACT(YEAR FROM i.invoice_date) = EXTRACT(YEAR FROM CURRENT_DATE)
+                    AND i.status != 'void'
+                )
+            """)
+            zero_parts = cur.fetchall()
+
+            if not zero_parts:
+                messagebox.showinfo("Price Inflation", "All parts have YTD sales. Nothing updated.")
+                conn.close()
+                return
+
+            updated = 0
+            for part_number, restock_value in zero_parts:
+                multiplier = 1.10 if float(restock_value) < 4 else 1.20
+                cur.execute(
+                    "UPDATE parts SET selling_price = selling_price * %s WHERE part_number = %s",
+                    (multiplier, part_number)
+                )
+                updated += 1
+
+            conn.commit()
+            cur.close()
+            conn.close()
+
+            messagebox.showinfo("Price Inflation", f"Updated prices for {updated} part(s).")
+            self._load_parts_data()
+            self._refresh_parts_table_page()
+
+        except Exception as e:
+            messagebox.showerror("DB Error", f"Failed to apply price inflation:\n{e}")
 
     # ════════════════════════════════════════════════════════════════════
     # Helpers
