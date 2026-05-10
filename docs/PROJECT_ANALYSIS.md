@@ -25,7 +25,7 @@ The National Office Supplies BIS is a desktop management system designed for inv
 
 ### Directory Layout
 
-```
+```plaintext
 national_office_supplies/
 ├── README.md (Excellent documentation)
 ├── START_SYSTEM.bat (One-click setup)
@@ -466,7 +466,7 @@ def get_db_connection():
 - `navigation_bar.py` and `__main__.py` are now Pylance-clean after moving widget metadata and typing DB config values.
 - The database schema layer is still the main missing foundation; the app remains dependent on view-level queries and sample fallbacks.
 
-5. **Session Management** (MEDIUM PRIORITY)
+1. **Session Management** (MEDIUM PRIORITY)
    - [ ] Track active user across app
    - [ ] Store role/permissions
    - [ ] Implement logout
@@ -474,19 +474,19 @@ def get_db_connection():
 
 ### 🟡 Important Gaps (SHOULD IMPLEMENT)
 
-6. **Data Binding** (MEDIUM PRIORITY)
+1. **Data Binding** (MEDIUM PRIORITY)
    - [ ] Connect MetricCard to database queries
    - [ ] Make AlertDropdown fetch real alerts
    - [ ] Dynamic profile data in ProfileOverlay
    - [ ] Real data in DashboardView tables
 
-7. **Error Handling & User Feedback** (MEDIUM PRIORITY)
+2. **Error Handling & User Feedback** (MEDIUM PRIORITY)
    - [ ] Modal dialogs for errors
    - [ ] Loading indicators during database operations
    - [ ] User-friendly error messages (not console prints)
    - [ ] Form validation feedback
 
-8. **Testing Framework** (LOW PRIORITY - but needed for production)
+3. **Testing Framework** (LOW PRIORITY - but needed for production)
    - [ ] Unit tests for validators
    - [ ] Integration tests for database queries
    - [ ] UI tests using pytest-qt or similar
@@ -494,7 +494,7 @@ def get_db_connection():
 
 ### 🟢 Nice-to-Have (COULD IMPLEMENT)
 
-9. **Advanced Features**
+1. **Advanced Features**
    - [ ] Dark mode toggle (infrastructure exists)
    - [ ] Data export (CSV, PDF)
    - [ ] Print functionality
@@ -502,13 +502,13 @@ def get_db_connection():
    - [ ] Bulk operations
    - [ ] Audit logs
 
-10. **Performance Optimizations**
+2. **Performance Optimizations**
     - [ ] Database connection pooling
     - [ ] Query caching for dashboards
     - [ ] Lazy loading for large datasets
     - [ ] Pagination for lists
 
-11. **Configuration Management**
+3. **Configuration Management**
     - [ ] Use `style_config.json` for themes
     - [ ] Database config validation
     - [ ] Feature flags
@@ -561,7 +561,7 @@ def get_db_connection():
 
 ### Phase 1: Foundation (CRITICAL - Weeks 1-2)
 
-**Priority Level: 🔴 URGENT**
+#### Priority Level: 🔴 URGENT
 
 1. **Set Up Database Infrastructure**
 
@@ -589,38 +589,38 @@ def get_db_connection():
 
 ### Phase 2: Core Features (HIGH - Weeks 3-4)
 
-5. **Implement Database Query Functions**
+1. **Implement Database Query Functions**
    - Create DAO/Repository classes for each entity
    - Implement prepared statements
    - Add transaction support
 
-6. **Complete Tab Modules**
+2. **Complete Tab Modules**
    - Fill customers.py with CRUD operations
    - Fill inventory.py with stock tracking
    - Fill payroll.py with employee data
    - Fill reports.py with analytics queries
 
-7. **Add Error Handling**
+3. **Add Error Handling**
    - Replace print() with logging
    - Add error dialog boxes
    - Implement loading indicators
 
 ### Phase 3: Polish (MEDIUM - Week 5)
 
-8. **Data Binding & Refresh**
+1. **Data Binding & Refresh**
    - Connect MetricCard to live database
    - Make AlertDropdown fetch real alerts
    - Update ProfileOverlay with database user
    - Implement refresh on tab switch
 
-9. **Testing Framework**
+2. **Testing Framework**
    - Write unit tests for validators
    - Integration tests for database
    - Setup pytest CI/CD pipeline
 
 ### Phase 4: Optimization (LOW - Week 6+)
 
-10. **Performance & UX**
+1. **Performance & UX**
     - Add connection pooling
     - Implement pagination
     - Add search/filter
@@ -634,7 +634,7 @@ def get_db_connection():
 
 #### **Create DAO Layer (Data Access Objects)**
 
-```
+```plaintext
 backend/
 ├── dao/
 │   ├── __init__.py
@@ -751,7 +751,7 @@ CREATE TABLE employees (
 
 ## 11. Development Priorities Matrix
 
-```
+```plaintext
 Urgency
    ↑
    │
