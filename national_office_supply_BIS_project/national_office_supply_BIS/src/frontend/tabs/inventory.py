@@ -274,7 +274,7 @@ class InventoryView(ctk.CTkFrame):
         cols = ("SKU", "Part Description", "Category", "Stock Count", "Low Stock Threshold", "Selling Price", "Unit", "Actions")
         widths = (80, 220, 100, 80, 130, 120, 60, 80)
 
-        tree = ttk.Treeview(container, columns=cols, show="headings", style="Parts.Treeview", yscrollcommand=vsb.set, xscrollcommand=hsb.set, height=10)
+        tree = ttk.Treeview(container, columns=cols, show="headings", style="Parts.Treeview", yscrollcommand=vsb.set, xscrollcommand=hsb.set)
         vsb.configure(command=tree.yview)
         hsb.configure(command=tree.xview)
 
@@ -283,6 +283,8 @@ class InventoryView(ctk.CTkFrame):
             tree.heading(col, text=col)
 
         self._parts_tree = tree
+        self._tbl_container = container
+        container.bind("<Configure>", self._on_table_resize)
         self._current_page = 1
 
         tree.grid(row=0, column=0, sticky="nsew")
@@ -290,6 +292,23 @@ class InventoryView(ctk.CTkFrame):
         hsb.grid(row=1, column=0, sticky="ew")
 
         self._refresh_parts_table_page()
+
+    def _on_table_resize(self, event=None):
+        """Recalculate page size based on available table height and re-render."""
+        if self._parts_tree is None:
+            return
+
+        row_height = 36  # Must match rowheight in Parts.Treeview style
+        header_height = 28  # Approximate heading row height
+        available_height = event.height if event else self._tbl_container.winfo_height()
+        usable = available_height - header_height
+
+        new_page_size = max(1, usable // row_height)
+
+        if new_page_size != self._page_size:
+            self._page_size = new_page_size
+            self._current_page = 1
+            self._refresh_parts_table_page()
 
     # ════════════════════════════════════════════════════════════════════
     # RIGHT PANEL: Place Restock Order + Receive Restock
@@ -485,7 +504,8 @@ class InventoryView(ctk.CTkFrame):
             self._refresh_parts_table_page()
 
     def _go_next_page(self):
-        total_pages = max(1, (len(self._parts_rows) + self._page_size - 1) // self._page_size)
+        rows = getattr(self, "_filtered_rows", self._parts_rows)
+        total_pages = max(1, (len(rows) + self._page_size - 1) // self._page_size)
         if self._current_page < total_pages:
             self._current_page += 1
             self._refresh_parts_table_page()
