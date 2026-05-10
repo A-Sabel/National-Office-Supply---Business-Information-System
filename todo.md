@@ -64,12 +64,12 @@ Tasks mapped to: Req 1, 2, 3, 10, 14, 16, 17
 Tasks mapped to: All technical implementation items 1–15
 
 - [x] Update `backend/database.py`: Centralized DB connection management (psycopg2 pool or single connection wrapper)
-- [ ] Implement `CustomerService`: `get_all()`, `get_by_id()`, `create()`, `update()`, `update_balance()`, `delete()` (soft delete with `is_active = FALSE`)
+- [x] Implement `CustomerService`: `get_all()`, `get_by_id()`, `create()`, `update()`, `update_balance()`, `delete()` (soft delete with `is_active = FALSE`)
 - [ ] Implement `PartService`: `get_all()`, `get_by_id()`, `create()`, `update()`, `get_low_stock()`, `update_stock()`, `get_supplier_cost()`
 - [ ] Implement `EmployeeService`: `get_all()`, `get_by_id()`, `get_hourly_staff()`, `get_active_staff()`
 - [ ] Implement `InvoiceService`: `create()`, `add_line_item()`, `get_invoice_total()`, `update_status()`, `get_customer_invoices()`
 - [ ] Implement `TimecardService`: `create_weekly_timecards()`, `get_missing_timecards()`, `mark_complete()`, `check_if_week_exists()`
-- [ ] Implement `PaymentService`: `record_payment()`, `get_customer_payments()`, `mark_invoice_paid()`, `update_balance()`
+- [x] Implement `PaymentService`: `record_payment()`, `get_customer_payments()`, `mark_invoice_paid()`, `update_balance()`
 - [ ] Implement `ReportService`: Base class for report queries with reusable filter/sort/export logic
 - [ ] Implement `SupplierCostService`: `get_lowest_cost_supplier()`, `get_all_costs_for_part()` (maps to Req 14)
 - [ ] **Deliverable:** Service layer with tested basic CRUD and query operations; all tab views can delegate to services
@@ -165,12 +165,12 @@ Tasks mapped to: Req 6, 7, 8, 9, 12; Technical items 1, 2, 8, 9, 12
 
 Tasks mapped to: Req 4, 9; Technical items 3, 4, 7, 9, 12, 13
 
-- [ ] Complete "Customer List & Balances" report:
+- [x] Complete "Customer List & Balances" report:
   - [ ] Query: `SELECT customer_id, company_name, balance, is_active FROM Customers`
   - [ ] Dynamic search/filter by company name or customer number
   - [ ] Show: Customer #, Company, Address, Current Balance, Status (Active/Closed)
   - [ ] Export to CSV with same columns
-- [ ] Complete "Customer Payment History" report:
+- [x] Complete "Customer Payment History" report:
   - [ ] Query: `SELECT customer_id, payment_date, amount, payment_method FROM Payments ORDER BY payment_date DESC`
   - [ ] Optional filter by date range or customer
   - [ ] Display: Customer, Date, Amount, Method, Running Balance
@@ -616,7 +616,6 @@ Phase 3 requires Phase 2 fully complete; focuses on validation and polish.
 ---
 
 ## Functional Specification Plan (FS-Sec)
-
 ### FS-Sec1: Security and Access Control
 
 - [x] Create login view module for credential validation against `Employees`
@@ -629,7 +628,7 @@ Phase 3 requires Phase 2 fully complete; focuses on validation and polish.
 ### FS-Sec2: Automated Identifiers
 
 - [ ] Ensure primary keys use auto-increment strategy (`SERIAL`/`BIGSERIAL`)
-- [ ] Remove manual ID entry from create forms
+- [x] Remove manual ID entry from create forms
 - [ ] Validate generated IDs are unique and sequential
 - [ ] Keep `part_number` as a flexible business SKU field
 
@@ -656,7 +655,7 @@ Phase 3 requires Phase 2 fully complete; focuses on validation and polish.
 - [x] Create Weekly Sales report (last 7 days invoice total)
 - [x] Create Sales Rep Payroll report (commission calculation: `Sales * 0.05`)
 - [x] Create Stock Ordering report (`stock <= trigger`)
-- [ ] Create searchable Customer List report (profiles and balances)
+- [x] Create searchable Customer List report (profiles and balances)
 - [ ] Add export option for each report (CSV/JSON)
 
 ### Controller Layer (Architectural Impact)
@@ -734,7 +733,7 @@ Sales, Invoicing & Account Balances
 - [ ] Cancellation: Cancelling sets invoice `status = 'void'` and removes invoice_lines; prohibit cancellation if `status = 'shipped'`
 - [ ] Payments & Partial Payments: Track in `customer_payments`; invoice becomes `is_paid` when cumulative payments >= `total_amount`; otherwise adjust customer's `current_balance`
 - [ ] Customer Balance Updates: Increase `current_balance` when invoice is shipped; decrease when payments logged
-- [ ] Customer Deletion Rule: Do not allow deletion if customer has invoices; set `is_active = FALSE` to close account
+- [x] Customer Deletion Rule: Do not allow deletion if customer has invoices; set `is_active = FALSE` to close account
 
 System, Security & Reporting Rules
 
