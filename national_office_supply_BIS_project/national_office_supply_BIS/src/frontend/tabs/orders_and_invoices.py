@@ -116,8 +116,13 @@ class OrdersDB:
     # READ helpers
     # ------------------------------------------------------------------
 
-    def fetch_invoices(self) -> list[dict]:
-        """Return the 200 most-recent invoices with customer and rep names."""
+    def fetch_invoices(self, status_filter: str | None = None) -> list[dict]:
+        """Return the 200 most-recent invoices with customer and rep names.
+        
+        Args:
+            status_filter: If provided, only return invoices matching this status
+                          (e.g. 'active', 'shipped'). None returns all statuses.
+        """
         sql = """
             SELECT
                 i.invoice_id,
@@ -133,15 +138,18 @@ class OrdersDB:
             FROM invoices i
             JOIN customers c ON c.customer_number = i.customer_number
             JOIN employees e ON e.employee_number = i.employee_number
-            ORDER BY i.date_written DESC, i.invoice_id DESC
-            LIMIT 200
         """
+        params: tuple = ()
+        if status_filter and status_filter.lower() in ("active", "shipped", "paid", "void"):
+            sql += " WHERE i.status = %s"
+            params = (status_filter.lower(),)
+        sql += " ORDER BY i.date_written DESC, i.invoice_id DESC LIMIT 200"
+
         conn = self._connect()
         try:
             with conn, conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
-                cur.execute(sql)
+                cur.execute(sql, params)
                 rows = [dict(r) for r in cur.fetchall()]
-                # Normalise invoice_number to the familiar INV-XXXX format
                 for r in rows:
                     r["invoice_number"] = f"INV-{r['invoice_id']}"
                 return rows
@@ -202,6 +210,84 @@ class OrdersDB:
             conn.close()
 
     # ------------------------------------------------------------------
+    # BACKEND VALIDATION
+    # ------------------------------------------------------------------
+
+    def validate_order(
+        self,
+        customer_number: int,
+        line_items: list[dict],
+        manager_override: bool = False,
+    ) -> list[str]:
+        """
+        Run backend validation rules before submitting an order.
+        Returns a list of error strings; empty list means all checks passed.
+
+        Rules checked:
+          1. Customer must exist and have is_active = TRUE
+          2. Every line item must have quantity >= 1
+          3. Every part must exist and have stock >= qty (unless manager_override)
+          4. Invoice total must equal SUM(qty * selling_price) per line
+        """
+        errors: list[str] = []
+        conn = self._connect()
+        try:
+            with conn, conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+                # Rule 1 — customer active check
+                cur.execute(
+                    "SELECT is_active FROM customers WHERE customer_number = %s",
+                    (customer_number,),
+                )
+                cust_row = cur.fetchone()
+                if not cust_row:
+                    errors.append(f"Customer #{customer_number} does not exist.")
+                elif not cust_row["is_active"]:
+                    errors.append(
+                        f"Customer #{customer_number} account is inactive and cannot be billed."
+                    )
+
+                for item in line_items:
+                    pnum = item["part_number"]
+                    qty = item["quantity"]
+                    unit = item.get("unit_price", 0)
+
+                    # Rule 2 — quantity >= 1
+                    if not isinstance(qty, int) or qty < 1:
+                        errors.append(
+                            f"Part #{pnum}: quantity must be ≥ 1 (got {qty})."
+                        )
+                        continue  # skip further checks for this line
+
+                    # Rule 3 — part exists and has stock
+                    cur.execute(
+                        "SELECT description, selling_price, stock_count FROM parts WHERE part_number = %s",
+                        (pnum,),
+                    )
+                    part_row = cur.fetchone()
+                    if not part_row:
+                        errors.append(f"Part #{pnum} does not exist in inventory.")
+                        continue
+
+                    if not manager_override and part_row["stock_count"] < qty:
+                        errors.append(
+                            f"'{part_row['description']}': requested {qty}, "
+                            f"only {part_row['stock_count']} in stock. "
+                            "Use Manager Override to proceed."
+                        )
+
+                    # Rule 4 — line total integrity  (qty × selling_price)
+                    expected_total = round(qty * float(part_row["selling_price"]), 2)
+                    actual_total = round(float(item.get("line_total", 0)), 2)
+                    if abs(expected_total - actual_total) > 0.01:
+                        errors.append(
+                            f"'{part_row['description']}': line total ₱{actual_total} "
+                            f"does not match qty × price = ₱{expected_total}."
+                        )
+        finally:
+            conn.close()
+        return errors
+
+    # ------------------------------------------------------------------
     # WRITE helpers
     # ------------------------------------------------------------------
 
@@ -211,17 +297,30 @@ class OrdersDB:
         employee_number: int,
         line_items: list[dict],
         total: float,
+        manager_override: bool = False,
     ) -> dict:
         """
-        Insert invoice + invoice_lines atomically.
-        Decrements stock_count for each part.
+        Validate then insert invoice + invoice_lines atomically.
+        Status is set to 'active' (pending shipment).
+        Stock is NOT decremented on creation — only on shipment (Req 13).
         Returns the new invoice row as a dict.
+        Raises ValueError with a human-readable message on validation failure.
         """
+        # ── Backend validation ──────────────────────────────────────────────
+        errors = self.validate_order(customer_number, line_items, manager_override)
+        if errors:
+            raise ValueError("Order validation failed:\n• " + "\n• ".join(errors))
+
+        # ── Recalculate total server-side to prevent tampering ──────────────
+        recalculated_total = sum(
+            round(item["quantity"] * item["unit_price"], 2) for item in line_items
+        )
+
         conn = self._connect()
         try:
             with conn:
                 with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
-                    # 1. Create the invoice header
+                    # 1. Create the invoice header (status = 'active')
                     cur.execute(
                         """
                         INSERT INTO invoices
@@ -229,13 +328,13 @@ class OrdersDB:
                         VALUES (%s, %s, %s, 'active', CURRENT_DATE)
                         RETURNING invoice_id, date_written::text
                         """,
-                        (employee_number, customer_number, total),
+                        (employee_number, customer_number, recalculated_total),
                     )
                     row = cur.fetchone()
                     invoice_id = row["invoice_id"]
                     date_written = row["date_written"]
 
-                    # 2. Insert each line item & decrement stock
+                    # 2. Insert each line item (stock NOT decremented here — happens on ship)
                     for item in line_items:
                         cur.execute(
                             """
@@ -247,33 +346,92 @@ class OrdersDB:
                                 invoice_id,
                                 item["part_number"],
                                 item["quantity"],
-                                item["line_total"],
+                                round(item["quantity"] * item["unit_price"], 2),
                             ),
-                        )
-                        cur.execute(
-                            """
-                            UPDATE parts
-                            SET stock_count = GREATEST(stock_count - %s, 0)
-                            WHERE part_number = %s
-                            """,
-                            (item["quantity"], item["part_number"]),
                         )
 
                     return {
                         "invoice_id": invoice_id,
                         "invoice_number": f"INV-{invoice_id}",
                         "date": date_written,
+                        "total": recalculated_total,
                     }
+        finally:
+            conn.close()
+
+    def ship_invoice(self, invoice_id: int) -> bool:
+        """
+        Mark an invoice as 'shipped', then for each line item:
+          - Decrement parts.stock_count by the ordered quantity (Req 13 / PartService)
+          - Add invoice total to customer's current_balance (Req 13 / customer balance)
+
+        Allowed only when current status is 'active'.
+        Returns True on success, False if transition is blocked.
+        """
+        conn = self._connect()
+        try:
+            with conn:
+                with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+                    # Lock the invoice row and check status
+                    cur.execute(
+                        "SELECT status, customer_number, total_amount FROM invoices WHERE invoice_id = %s FOR UPDATE",
+                        (invoice_id,),
+                    )
+                    inv_row = cur.fetchone()
+                    if not inv_row:
+                        return False
+                    if inv_row["status"] != "active":
+                        return False
+
+                    # Fetch line items
+                    cur.execute(
+                        "SELECT part_number, quantity FROM invoice_lines WHERE invoice_id = %s",
+                        (invoice_id,),
+                    )
+                    lines = cur.fetchall()
+
+                    # Decrement stock for each line (PartService.update_stock equivalent)
+                    for line in lines:
+                        cur.execute(
+                            """
+                            UPDATE parts
+                            SET stock_count = GREATEST(stock_count - %s, 0)
+                            WHERE part_number = %s
+                            """,
+                            (line["quantity"], line["part_number"]),
+                        )
+
+                    # Update customer balance += invoice total
+                    cur.execute(
+                        """
+                        UPDATE customers
+                        SET current_balance = current_balance + %s
+                        WHERE customer_number = %s
+                        """,
+                        (inv_row["total_amount"], inv_row["customer_number"]),
+                    )
+
+                    # Advance invoice status to 'shipped'
+                    cur.execute(
+                        "UPDATE invoices SET status = 'shipped' WHERE invoice_id = %s",
+                        (invoice_id,),
+                    )
+                    return True
         finally:
             conn.close()
 
     def update_invoice_status(self, invoice_id: int, new_status: str) -> bool:
         """
         Advance an invoice to a new status.
-        Allowed transitions: active→shipped, active→void, shipped→paid.
+        - active  → shipped : use ship_invoice() which also handles stock + balance
+        - active  → void    : handled here; removes line items
+        - shipped → paid    : handled here
         Returns True on success, False if the row was not found / transition blocked.
         """
-        VALID = {"active": {"shipped", "void"}, "shipped": {"paid"}}
+        if new_status == "shipped":
+            return self.ship_invoice(invoice_id)
+
+        VALID = {"active": {"void"}, "shipped": {"paid"}}
         conn = self._connect()
         try:
             with conn:
@@ -290,6 +448,14 @@ class OrdersDB:
                         return True
                     if new_status not in VALID.get(current, set()):
                         return False
+
+                    if new_status == "void":
+                        # Remove line items before voiding (cascade not guaranteed for void)
+                        cur.execute(
+                            "DELETE FROM invoice_lines WHERE invoice_id = %s",
+                            (invoice_id,),
+                        )
+
                     cur.execute(
                         "UPDATE invoices SET status = %s WHERE invoice_id = %s",
                         (new_status, invoice_id),
@@ -1011,13 +1177,29 @@ class CreateInvoicePanel(ctk.CTkFrame):
         if not self.line_items:
             messagebox.showwarning("No Items", "Please add at least one item.")
             return
-        total = sum(i["line_total"] for i in self.line_items)
+
+        # Re-validate all quantities >= 1
+        for item in self.line_items:
+            if not isinstance(item.get("quantity"), int) or item["quantity"] < 1:
+                messagebox.showwarning(
+                    "Invalid Quantity",
+                    f"Item '{item['description']}' has an invalid quantity. "
+                    "All quantities must be >= 1.",
+                )
+                return
+
+        # Recalculate total client-side (SUM qty * selling_price per line)
+        total = round(sum(
+            item["quantity"] * item["unit_price"] for item in self.line_items
+        ), 2)
+
         self.on_create({
-            "customer_number": cust["customer_number"],
-            "customer_name":   cust["customer_name"],
-            "company_name":    cust["company_name"],
-            "items": self.line_items,
-            "total": total,
+            "customer_number":  cust["customer_number"],
+            "customer_name":    cust["customer_name"],
+            "company_name":     cust["company_name"],
+            "items":            self.line_items,
+            "total":            total,
+            "manager_override": self._override_active,
         })
 
 
@@ -1151,6 +1333,7 @@ class OrdersView(ctk.CTkFrame):
                     employee_number=employee_number,
                     line_items=data["items"],
                     total=data["total"],
+                    manager_override=data.get("manager_override", False),
                 )
                 new_inv = {
                     "invoice_id":     result["invoice_id"],
@@ -1158,12 +1341,16 @@ class OrdersView(ctk.CTkFrame):
                     "customer_name":  data["customer_name"],
                     "company_name":   data["company_name"],
                     "customer_number": data["customer_number"],
-                    "amount":         data["total"],
+                    "amount":         result["total"],
                     "status":         "active",
                     "date":           result["date"],
                     "sales_rep":      getattr(self.controller.session, "employee_name", "—"),
                     "employee_number": employee_number,
                 }
+            except ValueError as exc:
+                # Validation errors from OrdersDB.validate_order
+                messagebox.showerror("Order Validation Failed", str(exc))
+                return
             except Exception as exc:
                 messagebox.showerror("Database Error",
                                      f"Could not save invoice to database:\n{exc}")
