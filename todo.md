@@ -136,27 +136,31 @@ Tasks mapped to: Req 2, 3, 11, 13, 15; Technical items 10, 11
 Tasks mapped to: Req 6, 7, 8, 9, 12; Technical items 1, 2, 8, 9, 12
 
 - [ ] Implement weekly timecard auto-generation:
-  - [ ] On app startup: `TimecardService.check_if_week_exists(this_week_date)`
-  - [ ] If missing AND not Sales Rep AND `is_active = TRUE`: Auto-create blank timecards for all hourly staff
-  - [ ] Prevent duplicates: Validate no existing record before insert
+  - [x] On app startup: `TimecardService.check_if_week_exists(this_week_date)`
+  - [x] If missing AND not Sales Rep AND `is_active = TRUE`: Auto-create blank timecards for all hourly staff
+  - [x] Prevent duplicates: Validate no existing record before insert
   - [ ] Test: Restart app mid-week → verify no duplicate timecards created
-- [ ] Implement `PayrollView` in `payroll.py`:
-  - [ ] "Missing Timecards" panel: Show hourly staff missing entries for current week (using `LEFT JOIN` logic)
-  - [ ] "Payroll Issuance" section:
-    - [ ] Button to generate weekly payroll (Monday via manual trigger in demo)
-    - [ ] For each hourly employee with complete timecard: `gross = hours_worked * hourly_wage`
-    - [ ] For each Rep this week: `commission = total_invoices_rep_wrote * 0.05` (5%)
-    - [ ] Export payroll to CSV: `employee_number | name | gross | commission | net`
-  - [ ] Button to "Issue Check": Records `Payment` for each employee, updates YTD sales
-  - [ ] Payroll history: List of past payroll runs (date, num checks issued)
+
+- [x] Implement `PayrollView` in `payroll.py`:
+  - [x] "Missing Timecards" panel: Show hourly staff missing entries for current week (using `LEFT JOIN` logic)
+  - [x] "Payroll Issuance" section:
+    - [x] Button to generate weekly payroll (Monday via manual trigger in demo)
+    - [x] For each hourly employee with complete timecard: `gross = hours_worked * hourly_wage`
+    - [x] For each Rep this week: `commission = total_invoices_rep_wrote * 0.05` (5%)
+    - [x] Export payroll to CSV: `employee_number | name | gross | commission | net`
+  - [x] Button to "Issue Check": Records `Payment` for each employee, updates YTD sales
+  - [x] Payroll history: List of past payroll runs (date, num checks issued)
+
 - [ ] Implement sales rep commission tracking:
-  - [ ] Identify invoices written by rep this week (filter by `invoices.rep_id`)
-  - [ ] Sum invoice totals, multiply by 0.05 → commission amount
+  - [x] Identify invoices written by rep this week (filter by `invoices.rep_id`)
+  - [x] Sum invoice totals, multiply by 0.05 → commission amount
   - [ ] Show in payroll export and Reports tab
-- [ ] Implement YTD sales update:
-  - [ ] Query `SUM(invoices.total_amount)` per rep since year start
-  - [ ] Store in employee record (or ephemeral in report)
-  - [ ] Display in Rep Performance report
+
+- [x] Implement YTD sales update:
+  - [x] Query `SUM(invoices.total_amount)` per rep since year start
+  - [x] Store in employee record (or ephemeral in report)
+  - [x] Display in Rep Performance report
+
 - [ ] **Deliverable:** Timecards auto-generate weekly. Payroll form calculates gross (hourly) + commission (5% reps) + YTD. Checks issued and exported.
 
 #### 2C. Advanced Reporting & Analytics (Week 4, Days 2–4) — **PRIORITY: HIGH**
