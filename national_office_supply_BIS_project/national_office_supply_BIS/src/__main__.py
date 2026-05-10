@@ -140,10 +140,10 @@ class NationalOfficeApp(ctk.CTk):
     def show_payroll(self):
         self._clear_content()
         self.current_view = PayrollView(
-            self.content_container,
-            controller=self,
+            self.content_container, self,
             role=self.session.role or "Manager",
             db_config=self.db_config,
+            employee_number=self.session.employee_number,
         )
         self.current_view.grid(row=0, column=0, sticky="nsew")
         

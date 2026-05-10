@@ -55,7 +55,7 @@ national_office_supplies/
       │       ├── dashboard.py ⚠️ (Partial)
       │       ├── customers.py ✅ (Implemented)
       │       ├── inventory.py ✅ (Implemented)
-      │       ├── payroll.py ❌ (Empty)
+      │       ├── payroll.py // UI and connected to db (May 10) -Jed
       │       ├── reports.py ✅ (Implemented)
         │       └── __init__.py (Empty)
         └── utils/
@@ -102,7 +102,7 @@ Based on code analysis, the system is designed to handle:
 | Inventory Tracking        | ✅ Partial     | Inventory tab exists and has live query scaffolding         |
 | Customer Management       | ✅ Partial     | Customers tab supports lookup, editing, and balance display |
 | Order Management          | ❌ Not Started | Feature mentioned but tab doesn't exist                     |
-| Payroll System            | ❌ Not Started | Empty tab placeholder                                       |
+| Payroll System            | Partial | UI and connected db both for manager, hourly, and sales rep                                      |
 | Reports Generation        | ✅ Partial     | Weekly sales report view now exists                         |
 | Database Operations       | ⚠️ Partial     | Connection code plus some tab-level queries                 |
 
@@ -239,7 +239,7 @@ Based on code analysis, the system is designed to handle:
 
 ### ❌ Not Implemented
 
-- **Payroll Tab** - Empty file
+- **Payroll Tab** - Now with different UI depending on employee's role (to be reviewed)
 
 ---
 
