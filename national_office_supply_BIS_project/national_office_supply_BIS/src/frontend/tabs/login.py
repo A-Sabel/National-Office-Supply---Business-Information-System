@@ -165,7 +165,7 @@ class LoginView(ctk.CTkFrame):
 
         # --- 2. MOCK CREDENTIALS FALLBACK (Testing Mode) ---
         print(f"[AUTH] Checking mock credentials for '{username}'...")
-        
+
         if username == "manager" and password == "admin123":
             return {
                 "employee_number": 1,
@@ -208,6 +208,12 @@ class LoginView(ctk.CTkFrame):
         for widget in self.form_container.winfo_children():
             widget.destroy()
 
+    def toggle_password_visibility(self):
+        """Toggle password visibility between hidden (*) and visible text."""
+        self.show_password = not self.show_password
+        self.password.configure(show="" if self.show_password else "*")
+        self.toggle_btn.configure(text="👁‍🗨" if self.show_password else "👁")
+
     def show_login_form(self):
         self.clear_form()
 
@@ -236,18 +242,39 @@ class LoginView(ctk.CTkFrame):
             text_color="black",
         )
         self.username.pack(pady=10)
+        self.username.bind("<Return>", lambda e: self.attempt_login())
+
+        # Password frame with toggle button
+        password_frame = ctk.CTkFrame(self.form_container, fg_color="transparent")
+        password_frame.pack(pady=10)
 
         self.password = ctk.CTkEntry(
-            self.form_container,
+            password_frame,
             placeholder_text="Password",
             show="*",
-            width=300,
+            width=260,
             height=45,
             corner_radius=5,
             fg_color="#f8f9fa",
             text_color="black",
         )
-        self.password.pack(pady=10)
+        self.password.pack(side="left", padx=(0, 5))
+        self.password.bind("<Return>", lambda e: self.attempt_login())
+
+        # Password visibility toggle button
+        self.show_password = False
+        self.toggle_btn = ctk.CTkButton(
+            password_frame,
+            text="👁",
+            width=40,
+            height=45,
+            corner_radius=5,
+            fg_color="#ecf0f1",
+            hover_color="#bdc3c7",
+            text_color="black",
+            command=self.toggle_password_visibility,
+        )
+        self.toggle_btn.pack(side="left")
 
         # Login Button (Mapped to attempt_login)
         self.login_btn = ctk.CTkButton(

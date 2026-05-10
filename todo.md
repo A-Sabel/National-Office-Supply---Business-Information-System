@@ -8,19 +8,21 @@ Use this file as your live implementation checklist.
 - [ ] Phase 2: Core Workflows and UI Integration complete
 - [ ] Phase 3: Validation, Hardening, and Delivery complete
 
-Completed Requirements: `10 / 17`  
-Last Updated: `2026-05-09`
+Completed Requirements: `12 / 17`  
+Last Updated: `2026-05-10`
 
 Current Code Snapshot:
 
-- Reports are now routed through `ReportsHubView` under `frontend/tabs/reports_tab/`.
-- Implemented reports: Inventory Report, Weekly Sales Report, Stock Ordering Report.
-- Weekly Sales also covers rep commissions and high-performance rep summaries.
-- `navigation_bar.py` already hides Manager-only tabs for non-manager roles.
+- `login.py` now validates credentials against PostgreSQL, populates the active session, and supports password visibility plus Enter-to-login.
+- `navigation_bar.py` hides tabs based on the active role.
+- `dashboard.py` is role-aware for Manager, Sales Rep, and Hourly users, with Decimal-safe KPI calculations and a compact Sales Rep goal progress card.
+- `orders_and_invoices.py` now provides an order/invoice workflow with overselling guards and cancellation handling.
+- `payroll.py` is role-based and connected to the database for Manager, Sales Rep, and Hourly views.
 - `CustomersView` already supports live balance display, search/filtering, payments, and customer edits.
+- `ReportsHubView` routes to live report tabs; implemented reports include Inventory Report, Weekly Sales Report, and Stock Ordering Report.
 - PostgreSQL schema migration has already been executed; the database tables are created.
-- Placeholder reports (still pending): Customer List & Balances, Customer Payment History.
-- `orders_and_invoices.py` is implemented with OrdersView, CreateInvoicePanel, and over-selling guards.
+- Placeholder reports still pending: Customer List & Balances, Customer Payment History.
+- Remaining gaps are mostly service-layer consolidation, session timeout/session manager work, audit logging, and a few report/workflow finish items.
 
 QD Section Prep:
 
@@ -89,10 +91,10 @@ Tasks mapped to: FS-Sec1, FS-Sec2, FS-Sec3, Req 16
 
 Tasks mapped to: All existing views (customers, inventory, reports)
 
-- [ ] Update `CustomersView`: Wire balance display to `CustomerService.get_by_id()` (live DB pull)
-- [ ] Update `CustomersView`: Wire payment processing to `PaymentService.record_payment()` and balance update
-- [ ] Update `InventoryView`: Wire data loaders to `PartService` and `SupplierCostService`
-- [ ] Update `ReportsHubView`: Wire all report endpoints to `ReportService` base methods
+- [x] Update `CustomersView`: Wire balance display to `CustomerService.get_by_id()` (live DB pull)
+- [x] Update `CustomersView`: Wire payment processing to `PaymentService.record_payment()` and balance update
+- [x] Update `InventoryView`: Wire data loaders to `PartService` and `SupplierCostService`
+- [x] Update `ReportsHubView`: Wire all report endpoints to `ReportService` base methods
 - [ ] Run integration test: Create order → check invoice total → check invoice in DB
 - [ ] Run integration test: Record payment → check customer balance updated → check Payments table
 - [ ] Run integration test: Load inventory → verify stock counts match DB
