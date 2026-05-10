@@ -40,13 +40,19 @@ class _SummaryCard(ctk.CTkFrame):
 # ─────────────────────────────────────────────────────────────────────────────
 # PANEL 1 — Worker Files  (Manager only)
 # ─────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# PANEL 1 — Worker Files  (Manager only)
+# REVISED: show-all SSN button, per-row eye icon, tighter table spacing
+# ─────────────────────────────────────────────────────────────────────────────
 class _WorkerFilesPanel(ctk.CTkFrame):
     def __init__(self, parent, db_config):
         super().__init__(parent, fg_color="transparent")
-        self.db_config   = db_config
-        self._revealed   = {}
-        self._search_var = ctk.StringVar()
-        self._all_rows   = []
+        self.db_config      = db_config
+        self._revealed      = {}          # iid → bool (per-row reveal state)
+        self._all_revealed  = False       # global toggle state
+        self._search_var    = ctk.StringVar()
+        self._all_rows      = []          # masked display rows
+        self._full_ssns     = {}          # index → full SSN string
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(1, weight=1)
@@ -64,19 +70,19 @@ class _WorkerFilesPanel(ctk.CTkFrame):
         sf.grid(row=0, column=1, sticky="e")
         ctk.CTkEntry(sf, textvariable=self._search_var,
                      placeholder_text="Search employees...",
-                     width=210, height=32, fg_color="#ffffff",
+                     width=200, height=30, fg_color="#ffffff",
                      border_color="#d0d7de", border_width=1,
-                     text_color="#1c2128", font=("Segoe UI", 12)
-                     ).pack(side="left", padx=(0, 6))
+                     text_color="#1c2128", font=("Segoe UI", 11)
+                     ).pack(side="left", padx=(0, 5))
         self._search_var.trace_add("write", lambda *_: self._filter())
-        ctk.CTkButton(sf, text="Filter", width=58, height=32,
+        ctk.CTkButton(sf, text="Filter", width=54, height=30,
                       fg_color="#e8eef5", hover_color="#d7e3f0",
                       text_color="#2c3e50", font=("Segoe UI", 11),
                       command=self._filter).pack(side="left")
-        ctk.CTkButton(sf, text="Refresh", width=68, height=32,
+        ctk.CTkButton(sf, text="Refresh", width=64, height=30,
                       fg_color="#ebf3fb", hover_color="#dbe9f9",
                       text_color="#1f5f9f", font=("Segoe UI", 11),
-                      command=self._load_db).pack(side="left", padx=(6, 0))
+                      command=self._load_db).pack(side="left", padx=(5, 0))
 
         # ── table card ────────────────────────────────────────────────────────
         card = ctk.CTkFrame(self, fg_color="#ffffff", corner_radius=12,
@@ -88,49 +94,71 @@ class _WorkerFilesPanel(ctk.CTkFrame):
         style = ttk.Style()
         style.theme_use("clam")
         style.configure("Worker.Treeview",
-                        font=("Segoe UI", 11), rowheight=34,
+                        font=("Segoe UI", 11), rowheight=30,
                         background="#ffffff", fieldbackground="#ffffff",
                         borderwidth=0)
         style.configure("Worker.Treeview.Heading",
                         font=("Segoe UI", 11, "bold"),
                         background="#2c3e50", foreground="#ffffff",
-                        relief="flat")
+                        relief="flat", padding=(6, 4))
         style.map("Worker.Treeview.Heading",
                   background=[("active", "#34495e")],
                   foreground=[("active", "#ffffff")])
+        style.map("Worker.Treeview",
+                  background=[("selected", "#d6eaf8")],
+                  foreground=[("selected", "#1a252f")])
 
-        cols = ("Employee Name", "Position", "Hourly Wage", "SSN")
+        # 5 columns — last one is the clickable eye icon
+        cols = ("Employee Name", "Position", "Hourly Wage", "SSN", "👁")
         self.tree = ttk.Treeview(card, columns=cols, show="headings",
-                                 height=8, style="Worker.Treeview")
+                                 height=9, style="Worker.Treeview")
+
         for col, w, anc, stretch in [
-            ("Employee Name", 250, "w",      True),
-            ("Position",      220, "w",      True),
-            ("Hourly Wage",   130, "center", False),
-            ("SSN",           160, "w",      False),
+            ("Employee Name", 150, "w",      True),
+            ("Position",      90, "w",      True),
+            ("Hourly Wage",   110, "center", True),
+            ("SSN",           155, "center", True),
+            ("👁",             36,  "center", False),
         ]:
             self.tree.heading(col, text=col)
-            self.tree.column(col, width=w, anchor=anc, stretch=stretch)
+            self.tree.column(col, width=w, anchor=anc,
+                             stretch=stretch, minwidth=w)
 
-        self.tree.tag_configure("even", background="#ffffff", foreground="#2c3e50")
-        self.tree.tag_configure("odd",  background="#f2f4f7", foreground="#2c3e50")
+        self.tree.tag_configure("even", background="#ffffff",
+                                foreground="#2c3e50")
+        self.tree.tag_configure("odd",  background="#f7f9fb",
+                                foreground="#2c3e50")
 
         vsb = ttk.Scrollbar(card, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=vsb.set)
-        vsb.grid(row=0, column=1, sticky="ns", pady=10)
-        self.tree.grid(row=0, column=0, sticky="nsew", padx=(10, 0), pady=10)
+        vsb.grid(row=0, column=1, sticky="ns", padx=(0, 6), pady=8)
+        self.tree.grid(row=0, column=0, sticky="nsew", padx=(8, 0), pady=8)
 
-        # reveal row
-        btn_row = ctk.CTkFrame(card, fg_color="transparent")
-        btn_row.grid(row=1, column=0, columnspan=2, sticky="ew",
-                     padx=10, pady=(0, 10))
-        ctk.CTkLabel(btn_row, text="Select a row then:",
-                     font=("Segoe UI", 11), text_color="#7f8c8d").pack(side="left")
-        ctk.CTkButton(btn_row, text="Show / Hide SSN",
-                      width=140, height=28,
-                      fg_color="#ebf3fb", hover_color="#dbe9f9",
-                      text_color="#1f5f9f", font=("Segoe UI", 11),
-                      corner_radius=6,
-                      command=self._toggle_ssn).pack(side="left", padx=8)
+        # bind click on eye column
+        self.tree.bind("<ButtonRelease-1>", self._on_click)
+
+        # ── bottom toolbar ────────────────────────────────────────────────────
+        toolbar = ctk.CTkFrame(card, fg_color="#f7f9fb", corner_radius=0,
+                               border_width=0)
+        toolbar.grid(row=1, column=0, columnspan=2, sticky="ew",
+                     padx=0, pady=0)
+
+        # left side — hint
+        ctk.CTkLabel(toolbar,
+                     text="Click 👁 on any row to reveal its SSN individually",
+                     font=("Segoe UI", 10), text_color="#95a5a6"
+                     ).pack(side="left", padx=12, pady=6)
+
+        # right side — show/hide all button
+        self._toggle_all_btn = ctk.CTkButton(
+            toolbar,
+            text="👁  Show All SSNs",
+            width=150, height=28,
+            fg_color="#ebf3fb", hover_color="#dbe9f9",
+            text_color="#1f5f9f", font=("Segoe UI", 11, "bold"),
+            corner_radius=6,
+            command=self._toggle_all_ssn)
+        self._toggle_all_btn.pack(side="right", padx=10, pady=6)
 
         self._load_db()
 
@@ -151,20 +179,20 @@ class _WorkerFilesPanel(ctk.CTkFrame):
             rows = cur.fetchall()
             cur.close(); conn.close()
 
-            # Mask SSN for display
             self._all_rows = [
                 (r["employee_name"], r["position"], r["hourly_wage"],
-                 "***-**-" + r["ssn"][-4:])
+                 "***-**-" + r["ssn"][-4:], "👁")
                 for r in rows
             ]
-            # Store full SSN separately keyed by index
             self._full_ssns = {i: r["ssn"] for i, r in enumerate(rows)}
 
         except Exception as e:
             messagebox.showerror("DB Error", f"Could not load employees:\n{e}")
-            self._all_rows = []
+            self._all_rows  = []
             self._full_ssns = {}
 
+        self._all_revealed = False
+        self._toggle_all_btn.configure(text="👁  Show All SSNs")
         self._render(self._all_rows)
 
     def _render(self, rows):
@@ -177,29 +205,66 @@ class _WorkerFilesPanel(ctk.CTkFrame):
             self._revealed[iid] = False
 
     def _filter(self):
-        q = self._search_var.get().lower()
+        q    = self._search_var.get().lower()
+        # filter against first 4 columns (not the eye icon column)
         data = [r for r in self._all_rows
-                if any(q in str(v).lower() for v in r)]
+                if any(q in str(v).lower() for v in r[:4])]
+        self._all_revealed = False
+        self._toggle_all_btn.configure(text="👁  Show All SSNs")
         self._render(data)
 
-    def _toggle_ssn(self):
-        sel = self.tree.selection()
-        if not sel:
-            return
-        iid  = sel[0]
+    # ── per-row eye click ──────────────────────────────────────────────────────
+    def _on_click(self, event):
+        """Toggle SSN reveal for the row whose 👁 cell was clicked."""
+        region = self.tree.identify_region(event.x, event.y)
+        col    = self.tree.identify_column(event.x)
+        iid    = self.tree.identify_row(event.y)
+
+        if region != "cell" or col != "#5" or not iid:
+            return  # only react to clicks in the 👁 column
+
+        self._toggle_row_ssn(iid)
+
+    def _toggle_row_ssn(self, iid):
+        """Flip the SSN mask for a single row."""
         vals = list(self.tree.item(iid, "values"))
+        children = list(self.tree.get_children())
+        idx  = children.index(iid)
+
         if self._revealed.get(iid, False):
-            last4   = vals[3][-4:]
+            # mask it
+            last4   = str(vals[3])[-4:]
             vals[3] = f"***-**-{last4}"
             self._revealed[iid] = False
         else:
-            # Find full SSN from _full_ssns by matching row index
-            children = list(self.tree.get_children())
-            idx      = children.index(iid)
-            full     = self._full_ssns.get(idx, vals[3])
-            vals[3]  = full
+            # reveal it
+            vals[3] = self._full_ssns.get(idx, vals[3])
             self._revealed[iid] = True
+
         self.tree.item(iid, values=vals)
+
+    # ── show / hide ALL ssns ──────────────────────────────────────────────────
+    def _toggle_all_ssn(self):
+        self._all_revealed = not self._all_revealed
+        children = list(self.tree.get_children())
+
+        for idx, iid in enumerate(children):
+            vals = list(self.tree.item(iid, "values"))
+            if self._all_revealed:
+                vals[3] = self._full_ssns.get(idx, vals[3])
+                self._revealed[iid] = True
+            else:
+                last4   = str(vals[3])[-4:]
+                vals[3] = f"***-**-{last4}"
+                self._revealed[iid] = False
+            self.tree.item(iid, values=vals)
+
+        self._toggle_all_btn.configure(
+            text="🔒  Hide All SSNs" if self._all_revealed else "👁  Show All SSNs",
+            fg_color="#fdecea" if self._all_revealed else "#ebf3fb",
+            hover_color="#f5c6cb" if self._all_revealed else "#dbe9f9",
+            text_color="#c0392b" if self._all_revealed else "#1f5f9f",
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -242,17 +307,21 @@ class _AuditPanel(ctk.CTkFrame):
                                        corner_radius=12, border_width=1,
                                        border_color="#e0e0e0")
         self._left_card.grid(row=0, column=0, sticky="nsew", padx=(0, 12))
+        self._left_card.grid_columnconfigure(0, weight=1)
+        self._left_card.grid_rowconfigure(1, weight=1)
         self._missing_title = ctk.CTkLabel(
             self._left_card, text="Missing Timecards: loading...",
             font=("Segoe UI", 13, "bold"), text_color="#e74c3c")
-        self._missing_title.pack(anchor="w", padx=16, pady=(14, 8))
-        self._missing_body = ctk.CTkFrame(self._left_card, fg_color="transparent")
-        self._missing_body.pack(fill="x")
+        self._missing_title.grid(row=0, column=0, sticky="w", padx=16, pady=(14, 8))
+        self._missing_body = ctk.CTkScrollableFrame(
+            self._left_card, fg_color="transparent", corner_radius=0, height = 260)
+        self._missing_body.grid(row=1, column=0, sticky="nsew", padx=8, pady=(0, 8))
+        self._missing_body.grid_columnconfigure(0, weight=1)
 
         # RIGHT – totals + buttons
         right_card = ctk.CTkFrame(body, fg_color="#ffffff", corner_radius=12,
                                   border_width=1, border_color="#e0e0e0",
-                                  width=240)
+                                  width=240, height = 260)
         right_card.grid(row=0, column=1, sticky="ns")
         right_card.grid_propagate(False)
 
@@ -502,7 +571,7 @@ class _TimecardPanel(ctk.CTkFrame):
                                 height=5, style="TC.Treeview")
         for col, w, anc in [("Week Starting", 200, "w"),
                              ("Hours", 90, "center"),
-                             ("Gross Pay", 120, "e"),
+                             ("Gross Pay", 120, "center"),
                              ("Status", 100, "center")]:
             self._ht.heading(col, text=col)
             self._ht.column(col, width=w, anchor=anc)
@@ -709,7 +778,7 @@ class _SalesRepPanel(ctk.CTkFrame):
         self._tree = ttk.Treeview(card, columns=cols, show="headings",
                                   height=8, style="SR.Treeview")
         for col, w, anc in [("Check #", 120, "w"), ("Type", 110, "w"),
-                             ("Gross Amount", 130, "e"),
+                             ("Gross Amount", 130, "center"),
                              ("Date Issued", 130, "center")]:
             self._tree.heading(col, text=col)
             self._tree.column(col, width=w, anchor=anc, stretch=True)
@@ -963,4 +1032,4 @@ class PayrollView(ctk.CTkFrame):
             self._cards["rate"].update_value(f"P{float(avg_wage):,.2f}")
 
         except Exception:
-            pass   # DB not yet connected — cards stay at "..."
+            pass   
