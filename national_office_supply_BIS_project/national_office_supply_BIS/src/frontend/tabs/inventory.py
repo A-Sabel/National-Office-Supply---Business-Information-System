@@ -126,30 +126,54 @@ class InventoryView(ctk.CTkFrame):
         self._build_receive_restock_card()
 
     def _load_parts_data(self):
-        """Loads data from the DB via QueryManager. Falls back to mock data if not connected."""
-        if hasattr(self.controller, 'query_manager'):
-            try:
-                # To be integrated with QD-Sec3 logic or general catalog query
-                # result = self.controller.query_manager.run_query("CATALOG_ALL")
-                # self._parts_rows = [tuple(row.values()) for row in result.rows]
-                pass
-            except Exception as e:
-                print(f"DB Error: {e}")
-        
-        # Mock Data Fallback
-        if not self._parts_rows:
-            seeds = [
-                ("BIC Pens Blue (12pk)", "Pens", 120, 20, "₱150.00", "Pack"),
-                ("HP LaserJet Toner Black", "Toners", 485, 50, "₱4500.00", "Unit"),
-                ("Paper Mate Eraser Pink (Lg)", "Pens", 75, 50, "₱25.00", "Unit"),
-                ("Bond Paper A4", "Paper", 0, 50, "₱250.00", "Ream"),
-            ]
-            rows = []
-            for idx in range(102):
-                desc, cat, stock, low, price, unit = seeds[idx % len(seeds)]
-                sku = str(10000 + idx)
-                rows.append((sku, desc, cat, stock, low, price, unit, "✏️ Edit"))
-            self._parts_rows = rows
+        import psycopg2
+        import psycopg2.extras
+        import traceback
+
+        print(f"[DB] Attempting connection with: {self.db_config}")
+
+        conn = psycopg2.connect(**self.db_config)
+        print("[DB] Connected!")
+
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("""
+            SELECT
+                p.part_number,
+                p.description,
+                p.selling_price,
+                p.stock_count,
+                p.trigger_amount,
+                p.on_order,
+                s.company_name AS best_supplier_name
+            FROM parts p
+            LEFT JOIN LATERAL (
+                SELECT ip.supplier_id
+                FROM item_parts ip
+                WHERE ip.part_number = p.part_number
+                ORDER BY ip.cost ASC
+                LIMIT 1
+            ) bs ON TRUE
+            LEFT JOIN suppliers s ON s.supplier_id = bs.supplier_id
+            ORDER BY p.part_number
+        """)
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+
+        print(f"[DB] Fetched {len(rows)} rows")
+
+        self._parts_rows = []
+        for r in rows:
+            self._parts_rows.append((
+                str(r["part_number"]),
+                r["description"],
+                "Office Supplies",
+                r["stock_count"],
+                r["trigger_amount"],
+                f"₱{float(r['selling_price']):,.2f}",
+                r["best_supplier_name"] or "—",
+                "✏️ Edit",
+            ))
 
     # ════════════════════════════════════════════════════════════════════
     # LEFT PANEL: Catalog header + search + table
