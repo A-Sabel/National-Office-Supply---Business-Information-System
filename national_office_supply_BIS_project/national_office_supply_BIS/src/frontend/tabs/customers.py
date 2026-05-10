@@ -177,9 +177,58 @@ class CustomersView(ctk.CTkFrame):
             text_color="#2c3e50",
         ).pack(pady=(12, 8))
 
-        self.customer_dropdown = ctk.CTkComboBox(self.payment_frame, values=[])
-        self.customer_dropdown.pack(fill="x", padx=12, pady=6)
-        self._style_input(self.customer_dropdown)
+        # Scrollable customer dropdown (replaces CTkComboBox for better scroll support)
+        self._customer_values = []
+        self._dropdown_popup = None
+
+        self._cust_dd_frame = ctk.CTkFrame(
+            self.payment_frame,
+            fg_color="#f8f9fa",
+            border_width=1,
+            border_color="#d0d7de",
+            corner_radius=8,
+            height=34,
+        )
+        self._cust_dd_frame.pack(fill="x", padx=12, pady=6)
+        self._cust_dd_frame.pack_propagate(False)
+
+        self._cust_dd_var = tk.StringVar(value="Select customer...")
+        self._cust_dd_entry = ctk.CTkEntry(
+            self._cust_dd_frame,
+            textvariable=self._cust_dd_var,
+            fg_color="transparent",
+            border_width=0,
+            height=34,
+            text_color="#1c1c1c",
+            placeholder_text_color="#7f8c8d",
+        )
+        self._cust_dd_entry.pack(side="left", fill="both", expand=True, padx=(6, 0))
+
+        self._cust_dd_btn = ctk.CTkButton(
+            self._cust_dd_frame,
+            text="▾",
+            width=28,
+            height=28,
+            fg_color="#abb2b9",
+            hover_color="#566573",
+            corner_radius=6,
+            command=self._toggle_customer_dropdown,
+        )
+        self._cust_dd_btn.pack(side="right", padx=4, pady=3)
+
+        self._cust_dd_entry.bind("<Button-1>", lambda e: self._toggle_customer_dropdown())
+        self._cust_dd_entry.bind("<FocusIn>", lambda e: self._cust_dd_frame.configure(border_color="#3498db"))
+        self._cust_dd_entry.bind("<FocusOut>", lambda e: self._cust_dd_frame.configure(border_color="#d0d7de"))
+        self._cust_dd_entry.bind("<KeyRelease>", self._filter_customer_dropdown)
+
+        # Shim so existing code using self.customer_dropdown still works
+        self.customer_dropdown = self._ScrollableDropdownShim(
+            get_fn=lambda: self._cust_dd_var.get(),
+            set_fn=self._set_customer_dropdown,
+            values_fn=lambda: self._customer_values,
+            configure_fn=self._configure_customer_dropdown,
+            cget_fn=self._cget_customer_dropdown,
+        )
 
         self.amount_entry = ctk.CTkEntry(
             self.payment_frame, placeholder_text="Enter amount"
@@ -209,17 +258,6 @@ class CustomersView(ctk.CTkFrame):
             command=self.process_payment,
         )
         process_btn.pack(fill="x", padx=12, pady=12)
-
-        # Ensure customer sequence starts at 41 (run once on load)
-        try:
-            conn = self._connect()
-            cur = conn.cursor()
-            cur.execute("SELECT setval('customers_customer_number_seq', 40);")
-            conn.commit()
-            cur.close()
-            conn.close()
-        except Exception as e:
-            print("Warning: could not set customer sequence:", e)
 
         # Load initial data
         self.load_customers()
@@ -253,12 +291,146 @@ class CustomersView(ctk.CTkFrame):
             "<FocusOut>", lambda _e, w=widget: w.configure(border_color="#d0d7de")
         )
 
+    # -----------------------------------------------
+    # Scrollable customer dropdown helpers
+    # -----------------------------------------------
+    class _ScrollableDropdownShim:
+        """Thin shim so existing code that calls customer_dropdown.set/get/cget/configure still works."""
+        def __init__(self, get_fn, set_fn, values_fn, configure_fn, cget_fn):
+            self._get = get_fn
+            self._set = set_fn
+            self._values = values_fn
+            self._configure = configure_fn
+            self._cget = cget_fn
+
+        def get(self):
+            return self._get()
+
+        def set(self, value):
+            self._set(value)
+
+        def configure(self, **kwargs):
+            self._configure(**kwargs)
+
+        def cget(self, key):
+            return self._cget(key)
+
+    def _configure_customer_dropdown(self, **kwargs):
+        if "values" in kwargs:
+            self._customer_values = list(kwargs["values"])
+
+    def _cget_customer_dropdown(self, key):
+        if key == "values":
+            return list(self._customer_values)
+        return None
+
+    def _set_customer_dropdown(self, value):
+        self._cust_dd_var.set(value)
+
+    def _toggle_customer_dropdown(self):
+        if self._dropdown_popup and self._dropdown_popup.winfo_exists():
+            self._dropdown_popup.destroy()
+            self._dropdown_popup = None
+            return
+        self._open_customer_dropdown(self._customer_values)
+
+    def _filter_customer_dropdown(self, event=None):
+        query = self._cust_dd_var.get().lower()
+        filtered = [v for v in self._customer_values if query in v.lower()]
+        if self._dropdown_popup and self._dropdown_popup.winfo_exists():
+            self._refresh_dropdown_list(filtered)
+        else:
+            self._open_customer_dropdown(filtered)
+
+    def _open_customer_dropdown(self, values):
+        if self._dropdown_popup and self._dropdown_popup.winfo_exists():
+            self._dropdown_popup.destroy()
+
+        popup = tk.Toplevel(self)
+        popup.overrideredirect(True)
+        popup.configure(bg="#ffffff")
+        self._dropdown_popup = popup
+
+        frame = self._cust_dd_frame
+        x = frame.winfo_rootx()
+        y = frame.winfo_rooty() + frame.winfo_height()
+        w = frame.winfo_width()
+        popup.geometry(f"{w}x200+{x}+{y}")
+        popup.lift()
+
+        container = tk.Frame(popup, bg="#ffffff", bd=1, relief="solid")
+        container.pack(fill="both", expand=True)
+
+        scrollbar = tk.Scrollbar(container, orient="vertical")
+        scrollbar.pack(side="right", fill="y")
+
+        self._dd_listbox = tk.Listbox(
+            container,
+            yscrollcommand=scrollbar.set,
+            bg="#ffffff",
+            fg="#1c1c1c",
+            selectbackground="#3498db",
+            selectforeground="#ffffff",
+            font=("Segoe UI", 11),
+            activestyle="none",
+            bd=0,
+            highlightthickness=0,
+            relief="flat",
+        )
+        self._dd_listbox.pack(side="left", fill="both", expand=True)
+        scrollbar.config(command=self._dd_listbox.yview)
+
+        self._refresh_dropdown_list(values)
+
+        def on_select(event=None):
+            sel = self._dd_listbox.curselection()
+            if sel:
+                chosen = self._dd_listbox.get(sel[0])
+                self._cust_dd_var.set(chosen)
+            popup.destroy()
+            self._dropdown_popup = None
+
+        self._dd_listbox.bind("<<ListboxSelect>>", on_select)
+        self._dd_listbox.bind("<Return>", on_select)
+
+        # Close when clicking outside
+        popup.bind("<FocusOut>", lambda e: popup.destroy() if popup.winfo_exists() else None)
+        self.winfo_toplevel().bind(
+            "<Button-1>",
+            lambda e: self._close_dropdown_if_outside(e, popup),
+            add="+",
+        )
+
+    def _refresh_dropdown_list(self, values):
+        lb = getattr(self, "_dd_listbox", None)
+        if lb is None or not lb.winfo_exists():
+            return
+        lb.delete(0, "end")
+        for v in values:
+            lb.insert("end", v)
+
+    def _close_dropdown_if_outside(self, event, popup):
+        try:
+            if not popup.winfo_exists():
+                return
+            wx, wy = popup.winfo_rootx(), popup.winfo_rooty()
+            ww, wh = popup.winfo_width(), popup.winfo_height()
+            if not (wx <= event.x_root <= wx + ww and wy <= event.y_root <= wy + wh):
+                popup.destroy()
+                self._dropdown_popup = None
+        except Exception:
+            pass
+
     def _build_filter_chips(self):
         chip_specs = [
             ("all", "All"),
-            ("balance", "With Balance"),
+            ("active", "Active"),
             ("inactive", "Inactive"),
+            ("balance", "With Balance"),
+            ("high_balance", "High Balance"),
             ("gold", "Gold Tier"),
+            ("silver", "Silver Tier"),
+            ("bronze", "Bronze Tier"),
         ]
         COMPACT_THRESHOLD = 4
         for child in self.chips_frame.winfo_children():
@@ -323,7 +495,7 @@ class CustomersView(ctk.CTkFrame):
             else:
                 bx = self.winfo_rootx()
                 by = self.winfo_rooty() + self.winfo_height()
-        self.filter_popup.geometry(f"220x160+{bx}+{by}")
+        self.filter_popup.geometry(f"230x440+{bx}+{by}")
         self.filter_popup.transient(self.winfo_toplevel())
 
         inner = ctk.CTkFrame(
@@ -337,9 +509,13 @@ class CustomersView(ctk.CTkFrame):
 
         chip_specs = [
             ("all", "All"),
-            ("balance", "With Balance"),
+            ("active", "Active"),
             ("inactive", "Inactive"),
+            ("balance", "With Balance"),
+            ("high_balance", "High Balance"),
             ("gold", "Gold Tier"),
+            ("silver", "Silver Tier"),
+            ("bronze", "Bronze Tier"),
         ]
 
         def _make_select_handler(k):
@@ -357,11 +533,12 @@ class CustomersView(ctk.CTkFrame):
             b = ctk.CTkButton(
                 inner,
                 text=label,
-                width=180,
-                height=34,
+                width=200,
+                height=42,
+                font=("Segoe UI", 12),
                 command=_make_select_handler(key),
             )
-            b.pack(pady=6)
+            b.pack(pady=3)
 
     def set_active_filter(self, filter_key):
         self.active_filter = filter_key
@@ -487,9 +664,17 @@ class CustomersView(ctk.CTkFrame):
 
             if self.active_filter == "balance" and amount > 0:
                 filtered.append(row)
+            elif self.active_filter == "high_balance" and amount >= 50000:
+                filtered.append(row)
+            elif self.active_filter == "active" and bool(is_active):
+                filtered.append(row)
             elif self.active_filter == "inactive" and not bool(is_active):
                 filtered.append(row)
             elif self.active_filter == "gold" and "gold" in tier_text:
+                filtered.append(row)
+            elif self.active_filter == "silver" and "silver" in tier_text:
+                filtered.append(row)
+            elif self.active_filter == "bronze" and "bronze" in tier_text:
                 filtered.append(row)
 
         return filtered
@@ -517,6 +702,16 @@ class CustomersView(ctk.CTkFrame):
 
         self.table_frame.hide_empty_state()
 
+        # Configure row color tags on the treeview
+        self.tree.tag_configure("row_gold",    background="#ffffff", foreground="#000000")
+        self.tree.tag_configure("row_silver",  background="#ffffff", foreground="#000000")
+        self.tree.tag_configure("row_bronze",  background="#ffffff", foreground="#000000")
+        self.tree.tag_configure("row_active",  background="#ffffff", foreground="#000000")
+        self.tree.tag_configure("row_inactive",background="#ffffff", foreground="#000000")
+        self.tree.tag_configure("row_default", background="#ffffff", foreground="#000000")
+        self.tree.tag_configure("hover_even",  background="#ffffff", foreground="#000000")
+        self.tree.tag_configure("hover_odd",   background="#ffffff", foreground="#000000")
+
         for row in rows_to_render:
             cust_no, company, contact, phone, address, balance, is_active, tier = row
             balance_str = (
@@ -529,12 +724,16 @@ class CustomersView(ctk.CTkFrame):
             tier_lower = tier_text.lower()
             if "gold" in tier_lower:
                 tier_str = "★ Gold"
+                row_tag = "row_gold"
             elif "silver" in tier_lower:
                 tier_str = "◈ Silver"
+                row_tag = "row_silver"
             elif "bronze" in tier_lower:
                 tier_str = "◆ Bronze"
+                row_tag = "row_bronze"
             else:
                 tier_str = tier_text
+                row_tag = "row_active" if bool(is_active) else "row_inactive"
 
             debt_value = 0.0
             if isinstance(balance, (int, float, Decimal)):
@@ -554,14 +753,33 @@ class CustomersView(ctk.CTkFrame):
                 balance=debt_value,
             )
 
-        self._populate_customer_dropdown(rows_to_render)
+        # Apply color tags to the newly inserted rows
+        all_items = self.tree.get_children()
+        rendered_items = all_items[len(all_items) - len(rows_to_render):]
+        _tag_map = []
+        for row in rows_to_render:
+            _, _, _, _, _, balance, is_active, tier = row
+            tier_lower = str(tier or "").lower()
+            if "gold" in tier_lower:
+                _tag_map.append("row_gold")
+            elif "silver" in tier_lower:
+                _tag_map.append("row_silver")
+            elif "bronze" in tier_lower:
+                _tag_map.append("row_bronze")
+            else:
+                _tag_map.append("row_active" if bool(is_active) else "row_inactive")
+
+        for item_id, tag in zip(self.tree.get_children(), _tag_map):
+            self.tree.item(item_id, tags=(tag,))
+
+        self._populate_customer_dropdown(self.base_rows)
 
     def _populate_customer_dropdown(self, rows):
         dropdown_values = ["Select customer..."]
         for r in rows:
             dropdown_values.append(f"{r[0]} - {r[1]}")
-        self.customer_dropdown.configure(values=dropdown_values)
-        self.customer_dropdown.set(dropdown_values[0])
+        self._customer_values = dropdown_values
+        self._cust_dd_var.set(dropdown_values[0])
 
     def load_customers(self, rows=None):
         """
@@ -709,14 +927,16 @@ class CustomersView(ctk.CTkFrame):
             conn = self._connect()
             cur = conn.cursor()
 
-            cur.execute(
-                """
-                INSERT INTO customers (company_name, customer_name, phone_number, address, current_balance)
-                VALUES (%s, %s, %s, %s, %s)
+            # Use MAX(customer_number)+1 so the ID always continues from the
+            # highest existing value — no dependency on the PostgreSQL sequence.
+            cur.execute("""
+                INSERT INTO customers (customer_number, company_name, customer_name, phone_number, address, current_balance)
+                VALUES (
+                    (SELECT COALESCE(MAX(customer_number), 0) + 1 FROM customers),
+                    %s, %s, %s, %s, %s
+                )
                 RETURNING customer_number;
-            """,
-                (company, contact, phone, address, opening_balance),
-            )
+            """, (company, contact, phone, address, opening_balance))
             result = cur.fetchone()
             new_id = result[0] if result else None
             conn.commit()
@@ -822,6 +1042,9 @@ class CustomersView(ctk.CTkFrame):
             )
             self.amount_entry.delete(0, "end")
             self.note_entry.delete(0, "end")
+            # Reset filter to All so customer stays visible regardless of new balance
+            self.active_filter = "all"
+            self._refresh_filter_chip_styles()
             self.load_customers()
 
         except Exception as e:
@@ -940,7 +1163,7 @@ class CustomersView(ctk.CTkFrame):
 
         popup = ctk.CTkToplevel(self)
         popup.title(f"Edit Customer {cust_id}")
-        popup.geometry("480x420")
+        popup.geometry("500x560")
         popup.transient(self.winfo_toplevel())
         popup.grab_set()
 
@@ -1043,6 +1266,9 @@ class CustomersView(ctk.CTkFrame):
             except Exception as e:
                 print("Error saving customer:", e)
                 messagebox.showerror("Error", f"Could not save changes: {e}")
+
+        for _e in (company_e, contact_e, phone_e, address_e, balance_e):
+            _e.bind("<Return>", lambda event: save_changes())
 
         save_btn = ctk.CTkButton(
             popup, text="Save Changes", fg_color="#3498db", command=save_changes

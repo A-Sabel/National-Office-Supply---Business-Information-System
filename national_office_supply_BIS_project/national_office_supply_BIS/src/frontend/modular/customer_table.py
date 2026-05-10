@@ -94,8 +94,6 @@ class CustomerTable(ctk.CTkFrame):
         self.vsb.pack(side="right", fill="y")
         self.hsb.pack(side="bottom", fill="x", padx=10, pady=(0, 8))
         self.tree.pack(fill="both", expand=True, padx=10, pady=10)
-        self.tree.bind("<Motion>", self._on_row_hover)
-        self.tree.bind("<Leave>", self._clear_hover)
 
         self.empty_state = ctk.CTkFrame(
             self,
