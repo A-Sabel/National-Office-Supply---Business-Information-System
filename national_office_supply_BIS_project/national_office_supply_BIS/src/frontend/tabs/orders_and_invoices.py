@@ -129,7 +129,6 @@ class OrdersDB:
                 i.invoice_id::text           AS invoice_number,
                 c.customer_name              AS customer_name,
                 c.company_name               AS company_name,
-                c.address                    AS customer_address,
                 c.customer_number,
                 COALESCE(i.total_amount, 0)  AS amount,
                 i.status,
@@ -182,7 +181,7 @@ class OrdersDB:
     def fetch_active_customers(self) -> list[dict]:
         """Return id + names for every active customer (for the create-invoice dropdown)."""
         sql = """
-            SELECT customer_number, customer_name, company_name, address
+            SELECT customer_number, customer_name, company_name
             FROM customers
             WHERE is_active = TRUE
             ORDER BY company_name
@@ -546,9 +545,6 @@ class InvoiceDetailDialog(tk.Toplevel):
                      bg=C["bg"], fg=C["text"]).pack(side="left")
 
         field_row("Customer:",    inv.get("customer_name", "—"))
-        field_row("Company:",     inv.get("company_name", "—"))
-        field_row("Address:",     inv.get("customer_address", "—"))
-        field_row("Customer #:",  str(inv.get("customer_number", "—")))
         field_row("Date Written:", inv.get("date", "—"))
         field_row("Sales Rep:",   inv.get("sales_rep", "—"))
         field_row("Amount Due:",  fmt_currency(inv.get("amount", 0)))
@@ -944,37 +940,31 @@ class CreateInvoicePanel(ctk.CTkFrame):
             tk.Label(parent, text=text, font=FONT_BOLD,
                      bg=C["panel"], fg=C["text_muted"]).pack(anchor="w", pady=(10, 2))
 
-        # ── Select Customer ───────────────────────────────────────────────────
-        section(body, "Select Customer")
-        # Dropdown shows customer_name
-        cust_display_names = [c["customer_name"] for c in self.customers_raw] if self.customers_raw else ["(No customers)"]
-        self.cust_var = tk.StringVar(value="Select Customer…")
-        ctk.CTkOptionMenu(
+        # ── Select Company (dropdown — filters contacts below) ───────────────
+        section(body, "Select Company")
+        company_names = sorted(set(c["company_name"] for c in self.customers_raw)) if self.customers_raw else ["(No companies)"]
+        self.company_var = tk.StringVar(value="Select Company…")
+        self.company_menu = ctk.CTkOptionMenu(
+            body, variable=self.company_var,
+            values=company_names,
+            fg_color=C["input_bg"], button_color=C["accent"],
+            text_color=C["text"], width=270, height=32,
+            command=self._on_company_selected,
+        )
+        self.company_menu.pack(anchor="w", pady=(0, 6))
+
+        # ── Select Contact (filters based on company, or shows all) ──────────
+        section(body, "Select Contact")
+        cust_display_names = [c["customer_name"] for c in self.customers_raw] if self.customers_raw else ["(No contacts)"]
+        self.cust_var = tk.StringVar(value="Select Contact…")
+        self.contact_menu = ctk.CTkOptionMenu(
             body, variable=self.cust_var,
             values=cust_display_names,
             fg_color=C["input_bg"], button_color=C["accent"],
             text_color=C["text"], width=270, height=32,
-            command=self._on_customer_selected,
-        ).pack(anchor="w", pady=(0, 6))
-
-        # ── Company (auto-filled) ─────────────────────────────────────────────
-        section(body, "Company")
-        company_field = tk.Frame(
-            body, bg=C["input_bg"],
-            highlightthickness=1, highlightbackground=C["input_bdr"],
-            width=270, height=32,
+            command=self._on_contact_selected,
         )
-        company_field.pack(anchor="w", pady=(0, 4))
-        company_field.pack_propagate(False)
-        self.company_lbl = tk.Label(
-            company_field,
-            text="—",
-            font=FONT,
-            bg=C["input_bg"],
-            fg=C["text_muted"],
-            anchor="w",
-        )
-        self.company_lbl.pack(fill="both", expand=True, padx=10, pady=5)
+        self.contact_menu.pack(anchor="w", pady=(0, 6))
 
         # ── Select Item ───────────────────────────────────────────────────────
         section(body, "Select Item")
@@ -1065,13 +1055,33 @@ class CreateInvoicePanel(ctk.CTkFrame):
                 return c
         return None
 
-    def _on_customer_selected(self, _=None):
+    def _on_company_selected(self, company_name=None):
+        """When company is chosen, filter the contact dropdown to that company's contacts."""
+        company = company_name or self.company_var.get()
+        contacts = [
+            c["customer_name"] for c in self.customers_raw
+            if c["company_name"] == company
+        ]
+        if not contacts:
+            contacts = ["(No contacts)"]
+        self.contact_menu.configure(values=contacts)
+        self.cust_var.set("Select Contact…")
+
+    def _on_contact_selected(self, _=None):
+        """When contact is chosen, auto-fill company."""
         c = self._get_selected_customer()
         if c:
-            self.company_lbl.configure(
-                text=c["company_name"],
-                fg=C["text"],
-            )
+            self.company_var.set(c["company_name"])
+            # Re-filter contact list to this company's contacts
+            contacts = [
+                x["customer_name"] for x in self.customers_raw
+                if x["company_name"] == c["company_name"]
+            ]
+            self.contact_menu.configure(values=contacts)
+
+    def _on_customer_selected(self, _=None):
+        """Legacy alias — kept for compatibility."""
+        self._on_contact_selected()
 
     def _on_part_selected(self, _=None):
         p = self._get_selected_part()
@@ -1217,10 +1227,9 @@ class CreateInvoicePanel(ctk.CTkFrame):
         ), 2)
 
         self.on_create({
-            "customer_number":    cust["customer_number"],
-            "customer_name":      cust["customer_name"],
-            "company_name":       cust["company_name"],
-            "customer_address":   cust.get("address", "—"),
+            "customer_number":  cust["customer_number"],
+            "customer_name":    cust["customer_name"],
+            "company_name":     cust["company_name"],
             "items":            self.line_items,
             "total":            total,
             "manager_override": self._override_active,
@@ -1364,7 +1373,6 @@ class OrdersView(ctk.CTkFrame):
                     "invoice_number": result["invoice_number"],
                     "customer_name":  data["customer_name"],
                     "company_name":   data["company_name"],
-                    "customer_address": data.get("customer_address", "—"),
                     "customer_number": data["customer_number"],
                     "amount":         result["total"],
                     "status":         "active",
@@ -1419,7 +1427,8 @@ class OrdersView(ctk.CTkFrame):
         self.create_panel.line_items.clear()
         self.create_panel._refresh_items_list()
         self.create_panel._update_total()
-        self.create_panel.cust_var.set("Select Customer…")
+        self.create_panel.cust_var.set("Select Contact…")
+        self.create_panel.company_var.set("Select Company…")
         self.create_panel.company_lbl.configure(text="—", fg=C["text_muted"])
         self.create_panel.part_var.set("Select Item…")
         self.create_panel.price_lbl.configure(text="—")
