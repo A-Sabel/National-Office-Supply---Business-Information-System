@@ -552,17 +552,17 @@ class InvoiceDetailDialog(tk.Toplevel):
         tk.Frame(body, bg=C["border"], height=1).pack(fill="x", pady=10)
 
         # ── Line Items section ────────────────────────────────────────────────
-        tk.Label(body, text="Line Items", font=FONT_BOLD,
+        tk.Label(body, text="Items", font=FONT_BOLD,
                  bg=C["bg"], fg=C["text_muted"]).pack(anchor="w", pady=(0, 4))
 
         lines_frame = tk.Frame(body, bg=C["bg"])
         lines_frame.pack(fill="x", pady=(0, 8))
 
         if self.db and inv.get("invoice_id"):
+            lines = []
             try:
                 lines = self.db.fetch_invoice_lines(inv["invoice_id"])
             except Exception as exc:
-                lines = []
                 tk.Label(lines_frame, text=f"Could not load line items: {exc}",
                          font=FONT_SMALL, bg=C["bg"], fg=C["danger"]).pack(anchor="w")
 
@@ -689,12 +689,20 @@ class ManageInvoicesPanel(ctk.CTkFrame):
             command=self._apply_filter,
         ).pack(side="right", padx=(6, 0))
 
+        # Refresh button (to the left of search)
+        tk.Button(
+            toolbar, text="↻", bg=C["panel"], fg=C["accent"],
+            font=("Segoe UI", 12, "bold"), relief="flat", bd=0,
+            padx=6, pady=2, cursor="hand2",
+            command=self._refresh,
+        ).pack(side="right", padx=(0, 4))
+
         # Search box
         self.search_var = tk.StringVar()
         self.search_var.trace_add("write", lambda *_: self._apply_filter())
         sb = tk.Frame(toolbar, bg=C["input_bg"],
                       highlightthickness=1, highlightbackground=C["input_bdr"])
-        sb.pack(side="right", padx=(0, 8))
+        sb.pack(side="right", padx=(0, 4))
         tk.Label(sb, text="🔍", bg=C["input_bg"], font=("Segoe UI", 9)).pack(side="left", padx=(6, 0))
         tk.Entry(sb, textvariable=self.search_var, font=FONT, relief="flat",
                  width=16, bg=C["input_bg"], fg=C["text"],
@@ -704,8 +712,8 @@ class ManageInvoicesPanel(ctk.CTkFrame):
         # (label, pixel_width, anchor)
         self.COLS = [
             ("Invoice #",     100, "w"),
-            ("Customer Name", 160, "w"),
             ("Company",       150, "w"),
+            ("Contact",       160, "w"),
             ("Amount",        110, "e"),
             ("Status",        90,  "center"),
             ("Date",          100, "w"),
@@ -786,13 +794,13 @@ class ManageInvoicesPanel(ctk.CTkFrame):
                      bg=bg, fg=C["accent"], anchor="w"
                      ).grid(row=0, column=0, **PAD)
 
-            # Col 1 — Customer Name
-            tk.Label(row, text=inv.get("customer_name", "—"), font=FONT,
+            # Col 1 — Company
+            tk.Label(row, text=inv.get("company_name", "—"), font=FONT,
                      bg=bg, fg=C["text"], anchor="w"
                      ).grid(row=0, column=1, **PAD)
 
-            # Col 2 — Company
-            tk.Label(row, text=inv.get("company_name", "—"), font=FONT,
+            # Col 2 — Contact
+            tk.Label(row, text=inv.get("customer_name", "—"), font=FONT,
                      bg=bg, fg=C["text_muted"], anchor="w"
                      ).grid(row=0, column=2, **PAD)
 
@@ -888,6 +896,17 @@ class ManageInvoicesPanel(ctk.CTkFrame):
     def add_invoice(self, inv):
         self._apply_filter()
 
+    def _refresh(self):
+        """Reload invoices from DB and re-render the list."""
+        if self.db:
+            try:
+                self.invoices = self.db.fetch_invoices()
+            except Exception as exc:
+                from tkinter import messagebox as _mb
+                _mb.showerror("Refresh Error", str(exc))
+                return
+        self._apply_filter()
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  CREATE INVOICE PANEL  (now wired to DB)
@@ -921,37 +940,31 @@ class CreateInvoicePanel(ctk.CTkFrame):
             tk.Label(parent, text=text, font=FONT_BOLD,
                      bg=C["panel"], fg=C["text_muted"]).pack(anchor="w", pady=(10, 2))
 
-        # ── Select Customer ───────────────────────────────────────────────────
-        section(body, "Select Customer")
-        # Dropdown shows customer_name
-        cust_display_names = [c["customer_name"] for c in self.customers_raw] if self.customers_raw else ["(No customers)"]
-        self.cust_var = tk.StringVar(value="Select Customer…")
-        ctk.CTkOptionMenu(
+        # ── Select Company (dropdown — filters contacts below) ───────────────
+        section(body, "Select Company")
+        company_names = sorted(set(c["company_name"] for c in self.customers_raw)) if self.customers_raw else ["(No companies)"]
+        self.company_var = tk.StringVar(value="Select Company…")
+        self.company_menu = ctk.CTkOptionMenu(
+            body, variable=self.company_var,
+            values=company_names,
+            fg_color=C["input_bg"], button_color=C["accent"],
+            text_color=C["text"], width=270, height=32,
+            command=self._on_company_selected,
+        )
+        self.company_menu.pack(anchor="w", pady=(0, 6))
+
+        # ── Select Contact (filters based on company, or shows all) ──────────
+        section(body, "Select Contact")
+        cust_display_names = [c["customer_name"] for c in self.customers_raw] if self.customers_raw else ["(No contacts)"]
+        self.cust_var = tk.StringVar(value="Select Contact…")
+        self.contact_menu = ctk.CTkOptionMenu(
             body, variable=self.cust_var,
             values=cust_display_names,
             fg_color=C["input_bg"], button_color=C["accent"],
             text_color=C["text"], width=270, height=32,
-            command=self._on_customer_selected,
-        ).pack(anchor="w", pady=(0, 6))
-
-        # ── Company (auto-filled) ─────────────────────────────────────────────
-        section(body, "Company")
-        company_field = tk.Frame(
-            body, bg=C["input_bg"],
-            highlightthickness=1, highlightbackground=C["input_bdr"],
-            width=270, height=32,
+            command=self._on_contact_selected,
         )
-        company_field.pack(anchor="w", pady=(0, 4))
-        company_field.pack_propagate(False)
-        self.company_lbl = tk.Label(
-            company_field,
-            text="—",
-            font=FONT,
-            bg=C["input_bg"],
-            fg=C["text_muted"],
-            anchor="w",
-        )
-        self.company_lbl.pack(fill="both", expand=True, padx=10, pady=5)
+        self.contact_menu.pack(anchor="w", pady=(0, 6))
 
         # ── Select Item ───────────────────────────────────────────────────────
         section(body, "Select Item")
@@ -1042,13 +1055,33 @@ class CreateInvoicePanel(ctk.CTkFrame):
                 return c
         return None
 
-    def _on_customer_selected(self, _=None):
+    def _on_company_selected(self, company_name=None):
+        """When company is chosen, filter the contact dropdown to that company's contacts."""
+        company = company_name or self.company_var.get()
+        contacts = [
+            c["customer_name"] for c in self.customers_raw
+            if c["company_name"] == company
+        ]
+        if not contacts:
+            contacts = ["(No contacts)"]
+        self.contact_menu.configure(values=contacts)
+        self.cust_var.set("Select Contact…")
+
+    def _on_contact_selected(self, _=None):
+        """When contact is chosen, auto-fill company."""
         c = self._get_selected_customer()
         if c:
-            self.company_lbl.configure(
-                text=c["company_name"],
-                fg=C["text"],
-            )
+            self.company_var.set(c["company_name"])
+            # Re-filter contact list to this company's contacts
+            contacts = [
+                x["customer_name"] for x in self.customers_raw
+                if x["company_name"] == c["company_name"]
+            ]
+            self.contact_menu.configure(values=contacts)
+
+    def _on_customer_selected(self, _=None):
+        """Legacy alias — kept for compatibility."""
+        self._on_contact_selected()
 
     def _on_part_selected(self, _=None):
         p = self._get_selected_part()
@@ -1394,7 +1427,8 @@ class OrdersView(ctk.CTkFrame):
         self.create_panel.line_items.clear()
         self.create_panel._refresh_items_list()
         self.create_panel._update_total()
-        self.create_panel.cust_var.set("Select Customer…")
+        self.create_panel.cust_var.set("Select Contact…")
+        self.create_panel.company_var.set("Select Company…")
         self.create_panel.company_lbl.configure(text="—", fg=C["text_muted"])
         self.create_panel.part_var.set("Select Item…")
         self.create_panel.price_lbl.configure(text="—")
