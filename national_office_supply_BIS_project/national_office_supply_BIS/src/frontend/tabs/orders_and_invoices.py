@@ -129,6 +129,7 @@ class OrdersDB:
                 i.invoice_id::text           AS invoice_number,
                 c.customer_name              AS customer_name,
                 c.company_name               AS company_name,
+                c.address                    AS customer_address,
                 c.customer_number,
                 COALESCE(i.total_amount, 0)  AS amount,
                 i.status,
@@ -181,7 +182,7 @@ class OrdersDB:
     def fetch_active_customers(self) -> list[dict]:
         """Return id + names for every active customer (for the create-invoice dropdown)."""
         sql = """
-            SELECT customer_number, customer_name, company_name
+            SELECT customer_number, customer_name, company_name, address
             FROM customers
             WHERE is_active = TRUE
             ORDER BY company_name
@@ -545,6 +546,9 @@ class InvoiceDetailDialog(tk.Toplevel):
                      bg=C["bg"], fg=C["text"]).pack(side="left")
 
         field_row("Customer:",    inv.get("customer_name", "—"))
+        field_row("Company:",     inv.get("company_name", "—"))
+        field_row("Address:",     inv.get("customer_address", "—"))
+        field_row("Customer #:",  str(inv.get("customer_number", "—")))
         field_row("Date Written:", inv.get("date", "—"))
         field_row("Sales Rep:",   inv.get("sales_rep", "—"))
         field_row("Amount Due:",  fmt_currency(inv.get("amount", 0)))
@@ -552,17 +556,17 @@ class InvoiceDetailDialog(tk.Toplevel):
         tk.Frame(body, bg=C["border"], height=1).pack(fill="x", pady=10)
 
         # ── Line Items section ────────────────────────────────────────────────
-        tk.Label(body, text="Line Items", font=FONT_BOLD,
+        tk.Label(body, text="Items", font=FONT_BOLD,
                  bg=C["bg"], fg=C["text_muted"]).pack(anchor="w", pady=(0, 4))
 
         lines_frame = tk.Frame(body, bg=C["bg"])
         lines_frame.pack(fill="x", pady=(0, 8))
 
         if self.db and inv.get("invoice_id"):
+            lines = []
             try:
                 lines = self.db.fetch_invoice_lines(inv["invoice_id"])
             except Exception as exc:
-                lines = []
                 tk.Label(lines_frame, text=f"Could not load line items: {exc}",
                          font=FONT_SMALL, bg=C["bg"], fg=C["danger"]).pack(anchor="w")
 
@@ -689,12 +693,20 @@ class ManageInvoicesPanel(ctk.CTkFrame):
             command=self._apply_filter,
         ).pack(side="right", padx=(6, 0))
 
+        # Refresh button (to the left of search)
+        tk.Button(
+            toolbar, text="↻", bg=C["panel"], fg=C["accent"],
+            font=("Segoe UI", 12, "bold"), relief="flat", bd=0,
+            padx=6, pady=2, cursor="hand2",
+            command=self._refresh,
+        ).pack(side="right", padx=(0, 4))
+
         # Search box
         self.search_var = tk.StringVar()
         self.search_var.trace_add("write", lambda *_: self._apply_filter())
         sb = tk.Frame(toolbar, bg=C["input_bg"],
                       highlightthickness=1, highlightbackground=C["input_bdr"])
-        sb.pack(side="right", padx=(0, 8))
+        sb.pack(side="right", padx=(0, 4))
         tk.Label(sb, text="🔍", bg=C["input_bg"], font=("Segoe UI", 9)).pack(side="left", padx=(6, 0))
         tk.Entry(sb, textvariable=self.search_var, font=FONT, relief="flat",
                  width=16, bg=C["input_bg"], fg=C["text"],
@@ -704,8 +716,8 @@ class ManageInvoicesPanel(ctk.CTkFrame):
         # (label, pixel_width, anchor)
         self.COLS = [
             ("Invoice #",     100, "w"),
-            ("Customer Name", 160, "w"),
             ("Company",       150, "w"),
+            ("Contact",       160, "w"),
             ("Amount",        110, "e"),
             ("Status",        90,  "center"),
             ("Date",          100, "w"),
@@ -786,13 +798,13 @@ class ManageInvoicesPanel(ctk.CTkFrame):
                      bg=bg, fg=C["accent"], anchor="w"
                      ).grid(row=0, column=0, **PAD)
 
-            # Col 1 — Customer Name
-            tk.Label(row, text=inv.get("customer_name", "—"), font=FONT,
+            # Col 1 — Company
+            tk.Label(row, text=inv.get("company_name", "—"), font=FONT,
                      bg=bg, fg=C["text"], anchor="w"
                      ).grid(row=0, column=1, **PAD)
 
-            # Col 2 — Company
-            tk.Label(row, text=inv.get("company_name", "—"), font=FONT,
+            # Col 2 — Contact
+            tk.Label(row, text=inv.get("customer_name", "—"), font=FONT,
                      bg=bg, fg=C["text_muted"], anchor="w"
                      ).grid(row=0, column=2, **PAD)
 
@@ -886,6 +898,17 @@ class ManageInvoicesPanel(ctk.CTkFrame):
         self._apply_filter()
 
     def add_invoice(self, inv):
+        self._apply_filter()
+
+    def _refresh(self):
+        """Reload invoices from DB and re-render the list."""
+        if self.db:
+            try:
+                self.invoices = self.db.fetch_invoices()
+            except Exception as exc:
+                from tkinter import messagebox as _mb
+                _mb.showerror("Refresh Error", str(exc))
+                return
         self._apply_filter()
 
 
@@ -1194,9 +1217,10 @@ class CreateInvoicePanel(ctk.CTkFrame):
         ), 2)
 
         self.on_create({
-            "customer_number":  cust["customer_number"],
-            "customer_name":    cust["customer_name"],
-            "company_name":     cust["company_name"],
+            "customer_number":    cust["customer_number"],
+            "customer_name":      cust["customer_name"],
+            "company_name":       cust["company_name"],
+            "customer_address":   cust.get("address", "—"),
             "items":            self.line_items,
             "total":            total,
             "manager_override": self._override_active,
@@ -1340,6 +1364,7 @@ class OrdersView(ctk.CTkFrame):
                     "invoice_number": result["invoice_number"],
                     "customer_name":  data["customer_name"],
                     "company_name":   data["company_name"],
+                    "customer_address": data.get("customer_address", "—"),
                     "customer_number": data["customer_number"],
                     "amount":         result["total"],
                     "status":         "active",
