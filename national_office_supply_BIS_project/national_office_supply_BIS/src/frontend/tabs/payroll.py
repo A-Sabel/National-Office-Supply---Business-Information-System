@@ -794,18 +794,28 @@ class _TimecardPanel(ctk.CTkFrame):
                 e.insert(0, default)
             return e
 
-        _field(0, "Week Starting", self._week.strftime("%b %d, %Y"))
+        week_field = _field(0, "Week Starting", self._week.strftime("%b %d, %Y"))
+        week_field.configure(state="disabled", fg_color="#f0f0f0", text_color="#7f8c8d")
         self._hours = _field(1, "Hours Worked", placeholder="e.g. 40")
         self._notes = _field(2, "Notes (optional)",
                              placeholder="Overtime, sick leave...")
 
-        ctk.CTkButton(form, text="Submit Timecard",
+        btn_row = ctk.CTkFrame(form, fg_color="transparent")
+        btn_row.pack(anchor="e", padx=16, pady=(0, 14))
+
+        ctk.CTkButton(btn_row, text="↻  Refresh",
+                      height=36, width=100,
+                      fg_color="#ebf3fb", hover_color="#dbe9f9",
+                      text_color="#1f5f9f", font=("Segoe UI", 12),
+                      corner_radius=8,
+                      command=self._load_history).pack(side="left", padx=(0, 8))
+
+        ctk.CTkButton(btn_row, text="Submit Timecard",
                       height=36, width=170,
                       fg_color="#3498db", hover_color="#2980b9",
                       text_color="#ffffff", font=("Segoe UI", 12, "bold"),
                       corner_radius=8,
-                      command=self._submit).pack(anchor="e", padx=16,
-                                                 pady=(0, 14))
+                      command=self._submit).pack(side="left")
 
         # ── history table ─────────────────────────────────────────────────────
         hist = ctk.CTkFrame(self, fg_color="#ffffff", corner_radius=12,
@@ -880,7 +890,7 @@ class _TimecardPanel(ctk.CTkFrame):
             ctk.CTkLabel(info, text=emp["employee_name"],
                          font=("Segoe UI", 16, "bold"),
                          text_color="#2c3e50").pack(anchor="w")
-            ctk.CTkLabel(info, text=emp["position"],
+            ctk.CTkLabel(info, text="Regular" if emp["position"] == "Hourly" else emp["position"],
                          font=("Segoe UI", 12),
                          text_color="#7f8c8d").pack(anchor="w")
             wage = f"P{emp['hourly_wage']:.2f}/hr" if emp["hourly_wage"] else "N/A"
@@ -970,10 +980,12 @@ class _TimecardPanel(ctk.CTkFrame):
         try:
             conn = _get_conn(self.db_config)
             cur  = conn.cursor()
+            # UPSERT: insert new or update existing blank timecard for this week
             cur.execute("""
                 INSERT INTO timecards (employee_number, week_date, hours_worked)
                 VALUES (%s, %s, %s)
-                ON CONFLICT DO NOTHING
+                ON CONFLICT (employee_number, week_date)
+                DO UPDATE SET hours_worked = EXCLUDED.hours_worked
             """, (self.employee_number, self._week, hrs))
             conn.commit()
             cur.close(); conn.close()
@@ -981,6 +993,7 @@ class _TimecardPanel(ctk.CTkFrame):
                                 f"Timecard submitted: {hrs} hrs for week of "
                                 f"{self._week.strftime('%b %d, %Y')}.")
             self._hours.delete(0, "end")
+            self._notes.delete(0, "end")
             self._load_history()
         except Exception as e:
             messagebox.showerror("DB Error", f"Timecard submission failed:\n{e}")
@@ -1068,7 +1081,7 @@ class _SalesRepPanel(ctk.CTkFrame):
             ctk.CTkLabel(info, text=emp["employee_name"],
                          font=("Segoe UI", 16, "bold"),
                          text_color="#2c3e50").pack(anchor="w")
-            ctk.CTkLabel(info, text=emp["position"],
+            ctk.CTkLabel(info, text="Sales Representative" if emp["position"] == "Sales Rep" else emp["position"],
                          font=("Segoe UI", 12),
                          text_color="#7f8c8d").pack(anchor="w")
             comm = float(emp["commission_rate"]) * 100
