@@ -91,10 +91,17 @@ Tasks mapped to: FS-Sec1, FS-Sec2, FS-Sec3, Req 16
 
 Tasks mapped to: All existing views (customers, inventory, reports)
 
+<<<<<<< HEAD
 - [x] Update `CustomersView`: Wire balance display to `CustomerService.get_by_id()` (live DB pull)
 - [x] Update `CustomersView`: Wire payment processing to `PaymentService.record_payment()` and balance update
 - [x] Update `InventoryView`: Wire data loaders to `PartService` and `SupplierCostService`
 - [x] Update `ReportsHubView`: Wire all report endpoints to `ReportService` base methods
+=======
+- [ ] Update `CustomersView`: Wire balance display to `CustomerService.get_by_id()` (live DB pull)
+- [ ] Update `CustomersView`: Wire payment processing to `PaymentService.record_payment()` and balance update
+- [] Update `InventoryView`: Wire data loaders to `PartService` and `SupplierCostService`
+- [ ] Update `ReportsHubView`: Wire all report endpoints to `ReportService` base methods
+>>>>>>> 1efc4b5 (Checked the to do and modify the inventory)
 - [ ] Run integration test: Create order → check invoice total → check invoice in DB
 - [ ] Run integration test: Record payment → check customer balance updated → check Payments table
 - [ ] Run integration test: Load inventory → verify stock counts match DB
@@ -200,18 +207,18 @@ Tasks mapped to: Req 5, 13; Technical items 5, 6, 14
   - [x] Display as critical alerts in top bar alert dropdown
   - [x] Show: Part #, Current Stock, Linked Unshipped Orders count
 - [ ] Implement inventory bottleneck detection (Technical item 5):
-  - [ ] Join `Invoice_Lines`, `Invoices`, `Parts`
-  - [ ] Filter: `Invoices.status = 'pending' AND Parts.stock_count <= 1`
+  - [x] Join `Invoice_Lines`, `Invoices`, `Parts`
+  - [x] Filter: `Invoices.status = 'pending' AND Parts.stock_count <= 1`
   - [ ] Show in alerts: "Order #X blocked: Part Y (stock: 0) needed"
 - [ ] Dynamic restocking strategy (Technical item 14):
-  - [ ] Find top 2 parts by YTD sales volume
-  - [ ] Double their `restock_value`
-  - [ ] Verify no unintended parts modified
+  - [x] Find top 2 parts by YTD sales volume
+  - [x] Double their `restock_value`
+  - [x] Verify no unintended parts modified
 - [ ] Price inflation logic (Technical item 15):
-  - [ ] Parts with 0 YTD sales:
-    - [ ] If `restock_value < 4`: price \*= 1.10
-    - [ ] If `restock_value >= 4`: price \*= 1.20
-  - [ ] Run logic on-demand (admin button or scheduled)
+  - [x] Parts with 0 YTD sales:
+    - [x] If `restock_value < 4`: price \*= 1.10
+    - [x] If `restock_value >= 4`: price \*= 1.20
+  - [x] Run logic on-demand (admin button or scheduled)
 - [ ] **Deliverable:** Critical alerts working, bottlenecks shown, dynamic restocking and pricing applied
 
 #### Phase 2 Summary
