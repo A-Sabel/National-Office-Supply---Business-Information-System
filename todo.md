@@ -9,7 +9,7 @@ Use this file as your live implementation checklist.
 - [ ] Phase 3: Validation, Hardening, and Delivery complete
 
 Completed Requirements: `12 / 17`  
-Last Updated: `2026-05-10`
+Last Updated: `2026-05-11`
 
 Current Code Snapshot:
 
@@ -18,10 +18,13 @@ Current Code Snapshot:
 - `dashboard.py` is role-aware for Manager, Sales Rep, and Hourly users, with Decimal-safe KPI calculations and a compact Sales Rep goal progress card.
 - `orders_and_invoices.py` now provides an order/invoice workflow with overselling guards and cancellation handling.
 - `payroll.py` is role-based and connected to the database for Manager, Sales Rep, and Hourly views.
+- Inventory, Orders & Invoices, and Payroll tabs now have collapsible panels/cards with hide/unhide toggles.
+- `backend/customer_service.py` and `backend/payment_service.py` provide the live customer/payment service layer.
 - `CustomersView` already supports live balance display, search/filtering, payments, and customer edits.
-- `ReportsHubView` routes to live report tabs; implemented reports include Inventory Report, Weekly Sales Report, and Stock Ordering Report.
+- `ReportsHubView` routes to live report tabs; implemented reports include Inventory Report, Weekly Sales Report, Stock Ordering Report, Customer List & Balances, and Customer Payment History.
+- `backend/query_manager.py` loads the QD read-only query library; UI wiring for those reads is still pending.
+- `backend/session_manager.py` now manages login/logout and session status.
 - PostgreSQL schema migration has already been executed; the database tables are created.
-- Placeholder reports still pending: Customer List & Balances, Customer Payment History.
 - Remaining gaps are mostly service-layer consolidation, session timeout/session manager work, audit logging, and a few report/workflow finish items.
 
 QD Section Prep:
@@ -91,17 +94,10 @@ Tasks mapped to: FS-Sec1, FS-Sec2, FS-Sec3, Req 16
 
 Tasks mapped to: All existing views (customers, inventory, reports)
 
-<<<<<<< HEAD
 - [x] Update `CustomersView`: Wire balance display to `CustomerService.get_by_id()` (live DB pull)
 - [x] Update `CustomersView`: Wire payment processing to `PaymentService.record_payment()` and balance update
 - [x] Update `InventoryView`: Wire data loaders to `PartService` and `SupplierCostService`
 - [x] Update `ReportsHubView`: Wire all report endpoints to `ReportService` base methods
-=======
-- [ ] Update `CustomersView`: Wire balance display to `CustomerService.get_by_id()` (live DB pull)
-- [ ] Update `CustomersView`: Wire payment processing to `PaymentService.record_payment()` and balance update
-- [] Update `InventoryView`: Wire data loaders to `PartService` and `SupplierCostService`
-- [ ] Update `ReportsHubView`: Wire all report endpoints to `ReportService` base methods
->>>>>>> 1efc4b5 (Checked the to do and modify the inventory)
 - [ ] Run integration test: Create order → check invoice total → check invoice in DB
 - [ ] Run integration test: Record payment → check customer balance updated → check Payments table
 - [ ] Run integration test: Load inventory → verify stock counts match DB
@@ -627,6 +623,7 @@ Phase 3 requires Phase 2 fully complete; focuses on validation and polish.
 ---
 
 ## Functional Specification Plan (FS-Sec)
+
 ### FS-Sec1: Security and Access Control
 
 - [x] Create login view module for credential validation against `Employees`

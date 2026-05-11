@@ -14,8 +14,12 @@ class CustomersView(ctk.CTkFrame):
         super().__init__(parent, fg_color="#f8f9fa")
         self.controller = controller
         self.db_config = db_config
-        self._customer_svc = CustomerService(db_config)
-        self._payment_svc = PaymentService(db_config)
+        self._customer_svc = CustomerService(
+            db_config, getattr(controller, "session_manager", None)
+        )
+        self._payment_svc = PaymentService(
+            db_config, getattr(controller, "session_manager", None)
+        )
         self.base_rows = []
         self.active_filter = "all"
         self.filter_buttons = {}
@@ -234,9 +238,16 @@ class CustomersView(ctk.CTkFrame):
         )
         self._cust_dd_btn.pack(side="right", padx=4, pady=3)
 
-        self._cust_dd_entry.bind("<Button-1>", lambda e: self._toggle_customer_dropdown())
-        self._cust_dd_entry.bind("<FocusIn>", lambda e: self._cust_dd_frame.configure(border_color="#3498db"))
-        self._cust_dd_entry.bind("<FocusOut>", lambda e: self._cust_dd_frame.configure(border_color="#d0d7de"))
+        self._cust_dd_entry.bind(
+            "<Button-1>", lambda e: self._toggle_customer_dropdown()
+        )
+        self._cust_dd_entry.bind(
+            "<FocusIn>", lambda e: self._cust_dd_frame.configure(border_color="#3498db")
+        )
+        self._cust_dd_entry.bind(
+            "<FocusOut>",
+            lambda e: self._cust_dd_frame.configure(border_color="#d0d7de"),
+        )
         self._cust_dd_entry.bind("<KeyRelease>", self._filter_customer_dropdown)
 
         # Shim so existing code using self.customer_dropdown still works
@@ -318,6 +329,7 @@ class CustomersView(ctk.CTkFrame):
     # -----------------------------------------------
     class _ScrollableDropdownShim:
         """Thin shim so existing code that calls customer_dropdown.set/get/cget/configure still works."""
+
         def __init__(self, get_fn, set_fn, values_fn, configure_fn, cget_fn):
             self._get = get_fn
             self._set = set_fn
@@ -416,7 +428,9 @@ class CustomersView(ctk.CTkFrame):
         self._dd_listbox.bind("<Return>", on_select)
 
         # Close when clicking outside
-        popup.bind("<FocusOut>", lambda e: popup.destroy() if popup.winfo_exists() else None)
+        popup.bind(
+            "<FocusOut>", lambda e: popup.destroy() if popup.winfo_exists() else None
+        )
         self.winfo_toplevel().bind(
             "<Button-1>",
             lambda e: self._close_dropdown_if_outside(e, popup),
@@ -549,6 +563,7 @@ class CustomersView(ctk.CTkFrame):
                     except Exception:
                         pass
                 self.set_active_filter(k)
+
             return _handler
 
         for key, label in chip_specs:
@@ -748,14 +763,26 @@ class CustomersView(ctk.CTkFrame):
         self.table_frame.hide_empty_state()
 
         # Configure row color tags on the treeview
-        self.tree.tag_configure("row_gold",    background="#ffffff", foreground="#000000")
-        self.tree.tag_configure("row_silver",  background="#ffffff", foreground="#000000")
-        self.tree.tag_configure("row_bronze",  background="#ffffff", foreground="#000000")
-        self.tree.tag_configure("row_active",  background="#ffffff", foreground="#000000")
-        self.tree.tag_configure("row_inactive",background="#ffffff", foreground="#000000")
-        self.tree.tag_configure("row_default", background="#ffffff", foreground="#000000")
-        self.tree.tag_configure("hover_even",  background="#ffffff", foreground="#000000")
-        self.tree.tag_configure("hover_odd",   background="#ffffff", foreground="#000000")
+        self.tree.tag_configure("row_gold", background="#ffffff", foreground="#000000")
+        self.tree.tag_configure(
+            "row_silver", background="#ffffff", foreground="#000000"
+        )
+        self.tree.tag_configure(
+            "row_bronze", background="#ffffff", foreground="#000000"
+        )
+        self.tree.tag_configure(
+            "row_active", background="#ffffff", foreground="#000000"
+        )
+        self.tree.tag_configure(
+            "row_inactive", background="#ffffff", foreground="#000000"
+        )
+        self.tree.tag_configure(
+            "row_default", background="#ffffff", foreground="#000000"
+        )
+        self.tree.tag_configure(
+            "hover_even", background="#ffffff", foreground="#000000"
+        )
+        self.tree.tag_configure("hover_odd", background="#ffffff", foreground="#000000")
 
         for row in rows_to_render:
             cust_no, company, contact, phone, address, balance, is_active, tier = row
@@ -800,7 +827,7 @@ class CustomersView(ctk.CTkFrame):
 
         # Apply color tags to the newly inserted rows
         all_items = self.tree.get_children()
-        rendered_items = all_items[len(all_items) - len(rows_to_render):]
+        rendered_items = all_items[len(all_items) - len(rows_to_render) :]
         _tag_map = []
         for row in rows_to_render:
             _, _, _, _, _, balance, is_active, tier = row
@@ -885,7 +912,9 @@ class CustomersView(ctk.CTkFrame):
             if opening_balance < 0:
                 raise InvalidOperation
         except (InvalidOperation, ValueError):
-            messagebox.showwarning("Validation", "Enter a valid balance amount (0 or more).")
+            messagebox.showwarning(
+                "Validation", "Enter a valid balance amount (0 or more)."
+            )
             return
 
         try:
@@ -904,7 +933,10 @@ class CustomersView(ctk.CTkFrame):
             self.address_entry.delete(0, "end")
             self.balance_entry.delete(0, "end")
 
-            messagebox.showinfo("Success", f"Customer added (ID {new_id}) with balance ₱{opening_balance:,.2f}.")
+            messagebox.showinfo(
+                "Success",
+                f"Customer added (ID {new_id}) with balance ₱{opening_balance:,.2f}.",
+            )
             self.load_customers()
         except Exception as e:
             print("Error adding customer:", e)
@@ -1052,11 +1084,11 @@ class CustomersView(ctk.CTkFrame):
         popup.transient(self.winfo_toplevel())
         popup.grab_set()
 
-        company  = data["company_name"] or ""
-        contact  = data["customer_name"] or ""
-        phone    = data["phone_number"] or ""
-        address  = data["address"] or ""
-        balance  = data["current_balance"]
+        company = data["company_name"] or ""
+        contact = data["customer_name"] or ""
+        phone = data["phone_number"] or ""
+        address = data["address"] or ""
+        balance = data["current_balance"]
         is_active = data["is_active"]
 
         ctk.CTkLabel(popup, text="Company", anchor="w").pack(

@@ -41,11 +41,22 @@ class InventoryKPIBar(ctk.CTkFrame):
         low_stock_count = 0
         out_of_stock_count = 0
 
-        for (sku, desc, cat, stock, low_threshold, price_str, unit, actions) in self.parts_data:
+        for (
+            sku,
+            desc,
+            cat,
+            stock,
+            low_threshold,
+            price_str,
+            unit,
+            actions,
+        ) in self.parts_data:
             try:
                 # Handle formatted currency strings or raw floats
                 if isinstance(price_str, str):
-                    price = float(price_str.replace("$", "").replace("₱", "").replace(",", ""))
+                    price = float(
+                        price_str.replace("$", "").replace("₱", "").replace(",", "")
+                    )
                 else:
                     price = float(price_str)
                 total_value += stock * price
@@ -71,13 +82,28 @@ class InventoryKPIBar(ctk.CTkFrame):
             container.grid_columnconfigure(i, weight=1)
 
         for idx, (title, val, clr, sub) in enumerate(cards):
-            card = ctk.CTkFrame(container, fg_color=CARD_BG, corner_radius=12, border_width=1, border_color=BORDER, height=108)
-            card.grid(row=0, column=idx, sticky="nsew", padx=(0 if idx == 0 else 5), pady=0)
+            card = ctk.CTkFrame(
+                container,
+                fg_color=CARD_BG,
+                corner_radius=12,
+                border_width=1,
+                border_color=BORDER,
+                height=108,
+            )
+            card.grid(
+                row=0, column=idx, sticky="nsew", padx=(0 if idx == 0 else 5), pady=0
+            )
             card.pack_propagate(False)
 
-            ctk.CTkLabel(card, text=title, font=("Segoe UI", 11, "bold"), text_color=TEXT_MUTED).pack(anchor="w", padx=14, pady=(12, 0))
-            ctk.CTkLabel(card, text=val, font=("Segoe UI", 22, "bold"), text_color=TEXT_DARK).pack(anchor="w", padx=14, pady=(2, 0))
-            ctk.CTkLabel(card, text=sub, font=("Segoe UI", 10), text_color=clr).pack(anchor="w", padx=14, pady=(0, 12))
+            ctk.CTkLabel(
+                card, text=title, font=("Segoe UI", 11, "bold"), text_color=TEXT_MUTED
+            ).pack(anchor="w", padx=14, pady=(12, 0))
+            ctk.CTkLabel(
+                card, text=val, font=("Segoe UI", 22, "bold"), text_color=TEXT_DARK
+            ).pack(anchor="w", padx=14, pady=(2, 0))
+            ctk.CTkLabel(card, text=sub, font=("Segoe UI", 10), text_color=clr).pack(
+                anchor="w", padx=14, pady=(0, 12)
+            )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -85,13 +111,16 @@ class InventoryKPIBar(ctk.CTkFrame):
 # ══════════════════════════════════════════════════════════════════════════════
 class InventoryView(ctk.CTkFrame):
     def __init__(self, parent, controller=None, db_config=None, **kwargs):
-        super().__init__(parent, fg_color=PAGE_BG, corner_radius=0, border_width=0, **kwargs)
+        super().__init__(
+            parent, fg_color=PAGE_BG, corner_radius=0, border_width=0, **kwargs
+        )
         self.controller = controller
         self.db_config = db_config
-        
+        self._session_manager = getattr(controller, "session_manager", None)
+
         # --- RBAC: Fetch role from the secure session ---
-        session = getattr(self.controller, 'session', None)
-        self.role = getattr(session, 'role', None) or "Manager"
+        session = getattr(self.controller, "session", None)
+        self.role = getattr(session, "role", None) or "Manager"
 
         self._right_panel_visible = True
         self._current_page = 1
@@ -110,7 +139,7 @@ class InventoryView(ctk.CTkFrame):
         self.left_panel = ctk.CTkFrame(self, fg_color="transparent")
         self.left_panel.grid(row=0, column=0, sticky="nsew", padx=20, pady=20)
         self.left_panel.columnconfigure(0, weight=1)
-        self.left_panel.rowconfigure(1, weight=0) # Keeps header tight
+        self.left_panel.rowconfigure(1, weight=0)  # Keeps header tight
 
         # KPI Bar
         self.kpi = InventoryKPIBar(self.left_panel, self._parts_rows)
@@ -119,7 +148,9 @@ class InventoryView(ctk.CTkFrame):
         self._build_catalog_section()
 
         # --- RIGHT PANEL: Restock Sidebar ---
-        self.right_panel = ctk.CTkScrollableFrame(self, fg_color="transparent", corner_radius=0, border_width=0)
+        self.right_panel = ctk.CTkScrollableFrame(
+            self, fg_color="transparent", corner_radius=0, border_width=0
+        )
         self.right_panel.grid(row=0, column=1, sticky="nsew", padx=20, pady=20)
 
         self._build_place_order_card()
@@ -127,11 +158,17 @@ class InventoryView(ctk.CTkFrame):
         self._build_bottleneck_card()
         self._build_admin_actions_card()
 
+    def _ensure_active_session(self, allowed_roles=None):
+        """Enforce session validity before inventory mutations."""
+        if self._session_manager is not None:
+            self._session_manager.ensure_active(allowed_roles)
+
     def _load_parts_data(self):
         import psycopg2
         import psycopg2.extras
 
         try:
+            assert self.db_config is not None
             conn = psycopg2.connect(**self.db_config)
             cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
             cur.execute("""
@@ -160,25 +197,29 @@ class InventoryView(ctk.CTkFrame):
 
             self._parts_rows = []
             for r in rows:
-                self._parts_rows.append((
-                    str(r["part_number"]),
-                    r["description"],
-                    "General",  # no category in schema
-                    r["stock_count"],
-                    r["trigger_amount"],
-                    f"₱{float(r['selling_price']):,.2f}",
-                    r["best_supplier_name"] or "—",
-                    "✏️ Edit",
-                ))
+                self._parts_rows.append(
+                    (
+                        str(r["part_number"]),
+                        r["description"],
+                        "General",  # no category in schema
+                        r["stock_count"],
+                        r["trigger_amount"],
+                        f"₱{float(r['selling_price']):,.2f}",
+                        r["best_supplier_name"] or "—",
+                        "✏️ Edit",
+                    )
+                )
 
         except Exception as e:
             print(f"[DB ERROR] _load_parts_data: {e}")
-            self._parts_rows = [] 
+            self._parts_rows = []
 
     def _fetch_suppliers(self):
         """Returns list of supplier names from DB for dropdowns."""
         import psycopg2
+
         try:
+            assert self.db_config is not None
             conn = psycopg2.connect(**self.db_config)
             cur = conn.cursor()
             cur.execute("SELECT company_name FROM suppliers ORDER BY company_name")
@@ -189,7 +230,7 @@ class InventoryView(ctk.CTkFrame):
         except Exception as e:
             print(f"[DB ERROR] _fetch_suppliers: {e}")
             return ["DB unavailable"]
-        
+
     # ════════════════════════════════════════════════════════════════════
     # LEFT PANEL: Catalog header + search + table
     # ════════════════════════════════════════════════════════════════════
@@ -198,27 +239,57 @@ class InventoryView(ctk.CTkFrame):
         hdr.grid(row=1, column=0, sticky="ew", pady=(0, 8))
         hdr.columnconfigure(0, weight=1)
 
-        ctk.CTkLabel(hdr, text=f"Parts Catalog ({len(self._parts_rows)} items)", font=FONT_TITLE, text_color=TEXT_DARK).grid(row=0, column=0, sticky="w")
+        ctk.CTkLabel(
+            hdr,
+            text=f"Parts Catalog ({len(self._parts_rows)} items)",
+            font=FONT_TITLE,
+            text_color=TEXT_DARK,
+        ).grid(row=0, column=0, sticky="w")
 
         actions = ctk.CTkFrame(hdr, fg_color="transparent")
         actions.grid(row=0, column=1, sticky="e")
 
         # --- RBAC: Add New Part Masking ---
         self.add_btn = ctk.CTkButton(
-            actions, text="+ Add New Part", width=130, height=34, corner_radius=6, 
-            fg_color=BRAND_BLUE, hover_color="#2980b9", font=("Segoe UI", 12, "bold"),
-            command=self.handle_add_new_part
+            actions,
+            text="+ Add New Part",
+            width=130,
+            height=34,
+            corner_radius=6,
+            fg_color=BRAND_BLUE,
+            hover_color="#2980b9",
+            font=("Segoe UI", 12, "bold"),
+            command=self.handle_add_new_part,
         )
         self.add_btn.pack(side="left", padx=(0, 8))
-        
-        if self.role != "Manager":
-            self.add_btn.configure(state="disabled", fg_color="#bdc3c7", text_color="#7f8c8d")
 
-        self.toggle_btn = ctk.CTkButton(actions, text="◀", width=34, height=34, corner_radius=8, fg_color="#2b9430", hover_color="#1c7421", text_color="#ffffff", font=("Segoe UI", 14, "bold"), command=self.toggle_side_panels)
+        if self.role != "Manager":
+            self.add_btn.configure(
+                state="disabled", fg_color="#bdc3c7", text_color="#7f8c8d"
+            )
+
+        self.toggle_btn = ctk.CTkButton(
+            actions,
+            text="◀",
+            width=34,
+            height=34,
+            corner_radius=8,
+            fg_color="#2b9430",
+            hover_color="#1c7421",
+            text_color="#ffffff",
+            font=("Segoe UI", 14, "bold"),
+            command=self.toggle_side_panels,
+        )
         self.toggle_btn.pack(side="left")
 
         # Search + filter bar
-        search_bar = ctk.CTkFrame(self.left_panel, fg_color=CARD_BG, corner_radius=10, border_width=1, border_color=BORDER)
+        search_bar = ctk.CTkFrame(
+            self.left_panel,
+            fg_color=CARD_BG,
+            corner_radius=10,
+            border_width=1,
+            border_color=BORDER,
+        )
         search_bar.grid(row=2, column=0, sticky="ew", pady=(0, 8))
 
         inner = ctk.CTkFrame(search_bar, fg_color="transparent")
@@ -232,27 +303,90 @@ class InventoryView(ctk.CTkFrame):
 
         self._search_var = tk.StringVar()
         self._search_var.trace_add("write", lambda *_: self._apply_search_filter())
-        ctk.CTkEntry(left_tools, textvariable=self._search_var, placeholder_text="Search…", width=240, height=34, corner_radius=6, fg_color="#f5f7fa", text_color=TEXT_DARK, border_color=BORDER, font=FONT_BODY).pack(side="left", padx=(0, 20))
+        ctk.CTkEntry(
+            left_tools,
+            textvariable=self._search_var,
+            placeholder_text="Search…",
+            width=240,
+            height=34,
+            corner_radius=6,
+            fg_color="#f5f7fa",
+            text_color=TEXT_DARK,
+            border_color=BORDER,
+            font=FONT_BODY,
+        ).pack(side="left", padx=(0, 20))
 
-        ctk.CTkLabel(left_tools, text="Filter:", font=FONT_BODY, text_color=TEXT_MUTED).pack(side="left", padx=(0, 8))
+        ctk.CTkLabel(
+            left_tools, text="Filter:", font=FONT_BODY, text_color=TEXT_MUTED
+        ).pack(side="left", padx=(0, 8))
         self._filter_var = tk.StringVar(value="All")
         self._filter_var.trace_add("write", lambda *_: self._apply_search_filter())
-        ctk.CTkOptionMenu(left_tools, variable=self._filter_var, values=["All", "In Stock", "Low Stock", "Out of Stock"], width=130, height=34, corner_radius=6, fg_color="#f5f7fa", button_color=BRAND_BLUE, text_color=TEXT_DARK, font=FONT_BODY).pack(side="left")
+        ctk.CTkOptionMenu(
+            left_tools,
+            variable=self._filter_var,
+            values=["All", "In Stock", "Low Stock", "Out of Stock"],
+            width=130,
+            height=34,
+            corner_radius=6,
+            fg_color="#f5f7fa",
+            button_color=BRAND_BLUE,
+            text_color=TEXT_DARK,
+            font=FONT_BODY,
+        ).pack(side="left")
 
-        self.prev_page_btn = ctk.CTkButton(right_tools, text="‹", width=30, height=28, corner_radius=6, fg_color="#f3f5f8", hover_color="#e8ecf2", text_color="#9ca3af", font=("Segoe UI", 13, "bold"), command=self._go_prev_page)
+        self.prev_page_btn = ctk.CTkButton(
+            right_tools,
+            text="‹",
+            width=30,
+            height=28,
+            corner_radius=6,
+            fg_color="#f3f5f8",
+            hover_color="#e8ecf2",
+            text_color="#9ca3af",
+            font=("Segoe UI", 13, "bold"),
+            command=self._go_prev_page,
+        )
         self.prev_page_btn.pack(side="left", padx=(0, 6))
 
-        self.page_label = ctk.CTkLabel(right_tools, text="1", width=42, height=28, corner_radius=6, fg_color="#ffffff", text_color=TEXT_DARK, font=("Segoe UI", 12, "bold"))
+        self.page_label = ctk.CTkLabel(
+            right_tools,
+            text="1",
+            width=42,
+            height=28,
+            corner_radius=6,
+            fg_color="#ffffff",
+            text_color=TEXT_DARK,
+            font=("Segoe UI", 12, "bold"),
+        )
         self.page_label.pack(side="left", padx=(0, 6))
 
-        self.page_count_label = ctk.CTkLabel(right_tools, text="of 1", text_color="#374151", font=("Segoe UI", 11))
+        self.page_count_label = ctk.CTkLabel(
+            right_tools, text="of 1", text_color="#374151", font=("Segoe UI", 11)
+        )
         self.page_count_label.pack(side="left", padx=(0, 6))
 
-        self.next_page_btn = ctk.CTkButton(right_tools, text="›", width=30, height=28, corner_radius=6, fg_color="#f3f5f8", hover_color="#e8ecf2", text_color="#9ca3af", font=("Segoe UI", 13, "bold"), command=self._go_next_page)
+        self.next_page_btn = ctk.CTkButton(
+            right_tools,
+            text="›",
+            width=30,
+            height=28,
+            corner_radius=6,
+            fg_color="#f3f5f8",
+            hover_color="#e8ecf2",
+            text_color="#9ca3af",
+            font=("Segoe UI", 13, "bold"),
+            command=self._go_next_page,
+        )
         self.next_page_btn.pack(side="left")
 
         # Table container
-        tbl_frame = ctk.CTkFrame(self.left_panel, fg_color=CARD_BG, corner_radius=10, border_width=1, border_color=BORDER)
+        tbl_frame = ctk.CTkFrame(
+            self.left_panel,
+            fg_color=CARD_BG,
+            corner_radius=10,
+            border_width=1,
+            border_color=BORDER,
+        )
         tbl_frame.grid(row=3, column=0, sticky="nsew", pady=(0, 0))
         self.left_panel.rowconfigure(3, weight=1)
 
@@ -261,10 +395,28 @@ class InventoryView(ctk.CTkFrame):
     def _build_parts_table(self, parent):
         style = ttk.Style()
         style.theme_use("clam")
-        style.configure("Parts.Treeview", background=CARD_BG, foreground=TEXT_DARK, rowheight=36, fieldbackground=CARD_BG, font=FONT_TABLE, borderwidth=0)
-        style.configure("Parts.Treeview.Heading", background=BRAND_NAVY, foreground=TEXT_WHITE, font=("Segoe UI", 11, "bold"), relief="flat")
-        style.map("Parts.Treeview", background=[("selected", "#d6e4f7")], foreground=[("selected", BRAND_NAVY)])
-        
+        style.configure(
+            "Parts.Treeview",
+            background=CARD_BG,
+            foreground=TEXT_DARK,
+            rowheight=36,
+            fieldbackground=CARD_BG,
+            font=FONT_TABLE,
+            borderwidth=0,
+        )
+        style.configure(
+            "Parts.Treeview.Heading",
+            background=BRAND_NAVY,
+            foreground=TEXT_WHITE,
+            font=("Segoe UI", 11, "bold"),
+            relief="flat",
+        )
+        style.map(
+            "Parts.Treeview",
+            background=[("selected", "#d6e4f7")],
+            foreground=[("selected", BRAND_NAVY)],
+        )
+
         container = ctk.CTkFrame(parent, fg_color="transparent")
         container.pack(fill="both", expand=True, padx=16, pady=16)
         container.columnconfigure(0, weight=1)
@@ -273,10 +425,26 @@ class InventoryView(ctk.CTkFrame):
         vsb = ttk.Scrollbar(container, orient="vertical")
         hsb = ttk.Scrollbar(container, orient="horizontal")
 
-        cols = ("SKU", "Part Description", "Category", "Stock Count", "Low Stock Threshold", "Selling Price", "Unit", "Actions")
+        cols = (
+            "SKU",
+            "Part Description",
+            "Category",
+            "Stock Count",
+            "Low Stock Threshold",
+            "Selling Price",
+            "Unit",
+            "Actions",
+        )
         widths = (80, 220, 100, 80, 130, 120, 60, 80)
 
-        tree = ttk.Treeview(container, columns=cols, show="headings", style="Parts.Treeview", yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+        tree = ttk.Treeview(
+            container,
+            columns=cols,
+            show="headings",
+            style="Parts.Treeview",
+            yscrollcommand=vsb.set,
+            xscrollcommand=hsb.set,
+        )
         vsb.configure(command=tree.yview)
         hsb.configure(command=tree.xview)
 
@@ -321,18 +489,31 @@ class InventoryView(ctk.CTkFrame):
 
         hdr = ctk.CTkFrame(card, fg_color="transparent")
         hdr.pack(fill="x", padx=10, pady=(8, 0))
-        ctk.CTkLabel(hdr, text="Place Restock Order", font=FONT_SECTION, text_color=TEXT_DARK).pack(anchor="w")
+        ctk.CTkLabel(
+            hdr, text="Place Restock Order", font=FONT_SECTION, text_color=TEXT_DARK
+        ).pack(anchor="w")
 
-        badge = ctk.CTkLabel(card, text="✓ Auto-Suggested: Lowest Cost Supplier", fg_color="#e8f5e9", text_color="#2e7d32", font=("Segoe UI", 9, "bold"), corner_radius=4)
+        badge = ctk.CTkLabel(
+            card,
+            text="✓ Auto-Suggested: Lowest Cost Supplier",
+            fg_color="#e8f5e9",
+            text_color="#2e7d32",
+            font=("Segoe UI", 9, "bold"),
+            corner_radius=4,
+        )
         badge.pack(fill="x", padx=10, pady=(6, 6))
 
         frame = ctk.CTkFrame(card, fg_color="transparent")
         frame.pack(fill="x", padx=10, pady=(0, 5))
-        ctk.CTkLabel(frame, text="Part Name/SKU", font=FONT_SMALL, text_color=TEXT_MUTED).pack(anchor="w", pady=(0, 3))
+        ctk.CTkLabel(
+            frame, text="Part Name/SKU", font=FONT_SMALL, text_color=TEXT_MUTED
+        ).pack(anchor="w", pady=(0, 3))
         self.po_part_combo = ctk.CTkComboBox(
             frame,
             values=[r[1] for r in self._parts_rows],
-            height=28, fg_color="#f5f7fa", border_color=BORDER
+            height=28,
+            fg_color="#f5f7fa",
+            border_color=BORDER,
         )
         self.po_part_combo.pack(fill="x")
 
@@ -343,75 +524,128 @@ class InventoryView(ctk.CTkFrame):
 
         qty_frame = ctk.CTkFrame(qty_supplier, fg_color="transparent")
         qty_frame.grid(row=0, column=0, sticky="ew", padx=(0, 6))
-        ctk.CTkLabel(qty_frame, text="Quantity", font=FONT_SMALL, text_color=TEXT_MUTED).pack(anchor="w")
-        self.po_qty_entry = ctk.CTkEntry(qty_frame, height=28, fg_color="#f5f7fa", placeholder_text="500")
+        ctk.CTkLabel(
+            qty_frame, text="Quantity", font=FONT_SMALL, text_color=TEXT_MUTED
+        ).pack(anchor="w")
+        self.po_qty_entry = ctk.CTkEntry(
+            qty_frame, height=28, fg_color="#f5f7fa", placeholder_text="500"
+        )
         self.po_qty_entry.pack(fill="x", pady=(2, 0))
 
         supp_frame = ctk.CTkFrame(qty_supplier, fg_color="transparent")
         supp_frame.grid(row=0, column=1, sticky="ew", padx=(6, 0))
-        ctk.CTkLabel(supp_frame, text="Supplier", font=FONT_SMALL, text_color=TEXT_MUTED).pack(anchor="w")
+        ctk.CTkLabel(
+            supp_frame, text="Supplier", font=FONT_SMALL, text_color=TEXT_MUTED
+        ).pack(anchor="w")
         supplier_names = self._fetch_suppliers()
-        self.supplier_combo = ctk.CTkComboBox(supp_frame, values=supplier_names, height=28, fg_color="#f5f7fa")
+        self.supplier_combo = ctk.CTkComboBox(
+            supp_frame, values=supplier_names, height=28, fg_color="#f5f7fa"
+        )
         self.supplier_combo.pack(fill="x", pady=(2, 0))
 
         price_info = ctk.CTkFrame(card, fg_color="#f5f7fa", corner_radius=6)
         price_info.pack(fill="x", padx=10, pady=(6, 6))
         price_info.grid_columnconfigure(0, weight=1)
         price_info.grid_columnconfigure(1, weight=1)
-        ctk.CTkLabel(price_info, text="Est. Cost", font=("Segoe UI", 9, "bold"), text_color=TEXT_DARK).grid(row=0, column=0, sticky="w", padx=10, pady=5)
-        ctk.CTkLabel(price_info, text="₱2,745.00", font=("Segoe UI", 9, "bold"), text_color=TEXT_DARK).grid(row=0, column=1, sticky="e", padx=10, pady=5)
+        ctk.CTkLabel(
+            price_info,
+            text="Est. Cost",
+            font=("Segoe UI", 9, "bold"),
+            text_color=TEXT_DARK,
+        ).grid(row=0, column=0, sticky="w", padx=10, pady=5)
+        ctk.CTkLabel(
+            price_info,
+            text="₱2,745.00",
+            font=("Segoe UI", 9, "bold"),
+            text_color=TEXT_DARK,
+        ).grid(row=0, column=1, sticky="e", padx=10, pady=5)
 
         # --- RBAC: Submit PO Masking ---
         self.submit_po_btn = ctk.CTkButton(
-            card, text="✈ Submit PO", height=32, corner_radius=6, 
-            fg_color=BRAND_BLUE, hover_color="#2980b9", font=("Segoe UI", 11, "bold"),
-            command=self.handle_submit_po  # <-- ADD THIS LINE
+            card,
+            text="✈ Submit PO",
+            height=32,
+            corner_radius=6,
+            fg_color=BRAND_BLUE,
+            hover_color="#2980b9",
+            font=("Segoe UI", 11, "bold"),
+            command=self.handle_submit_po,  # <-- ADD THIS LINE
         )
         self.submit_po_btn.pack(fill="x", padx=10, pady=(0, 8))
 
         if self.role != "Manager":
-            self.submit_po_btn.configure(state="disabled", fg_color="#bdc3c7", text_color="#7f8c8d")
+            self.submit_po_btn.configure(
+                state="disabled", fg_color="#bdc3c7", text_color="#7f8c8d"
+            )
 
     def _build_receive_restock_card(self):
         card = self._create_card_container(self.right_panel)
         card.pack(fill="x", pady=(0, 2))
 
-        ctk.CTkLabel(card, text="Receive Restock", font=FONT_SECTION, text_color=TEXT_DARK).pack(anchor="w", padx=10, pady=(8, 4))
+        ctk.CTkLabel(
+            card, text="Receive Restock", font=FONT_SECTION, text_color=TEXT_DARK
+        ).pack(anchor="w", padx=10, pady=(8, 4))
 
         search_row = ctk.CTkFrame(card, fg_color="#f5f7fa", corner_radius=6)
         search_row.pack(fill="x", padx=10, pady=(0, 6))
         search_row.grid_columnconfigure(0, weight=1)
         self.recv_po_entry = ctk.CTkEntry(
-        search_row, placeholder_text="PO Number",
-        height=28, fg_color="#f5f7fa", border_color=BORDER
+            search_row,
+            placeholder_text="PO Number",
+            height=28,
+            fg_color="#f5f7fa",
+            border_color=BORDER,
         )
         self.recv_po_entry.grid(row=0, column=0, sticky="ew", padx=(0, 2), pady=4)
 
         info_bg = ctk.CTkFrame(card, fg_color="#f8f9fa", corner_radius=6)
         info_bg.pack(fill="x", padx=10, pady=(0, 6))
 
-        ctk.CTkLabel(info_bg, text="PO-2023-112", font=("Segoe UI", 11, "bold"), text_color=TEXT_DARK).pack(anchor="w", padx=8, pady=(4, 0))
-        ctk.CTkLabel(info_bg, text="Supplier", font=FONT_SMALL, text_color=TEXT_MUTED).pack(anchor="w", padx=8, pady=(3, 0))
-        ctk.CTkLabel(info_bg, text="Apex", font=("Segoe UI", 11), text_color=TEXT_DARK).pack(anchor="w", padx=8, pady=(0, 2))
+        ctk.CTkLabel(
+            info_bg,
+            text="PO-2023-112",
+            font=("Segoe UI", 11, "bold"),
+            text_color=TEXT_DARK,
+        ).pack(anchor="w", padx=8, pady=(4, 0))
+        ctk.CTkLabel(
+            info_bg, text="Supplier", font=FONT_SMALL, text_color=TEXT_MUTED
+        ).pack(anchor="w", padx=8, pady=(3, 0))
+        ctk.CTkLabel(
+            info_bg, text="Apex", font=("Segoe UI", 11), text_color=TEXT_DARK
+        ).pack(anchor="w", padx=8, pady=(0, 2))
 
         summary_grid = ctk.CTkFrame(info_bg, fg_color="transparent")
         summary_grid.pack(fill="x", padx=8, pady=(3, 4))
         summary_grid.grid_columnconfigure((0, 1, 2), weight=1)
 
-        for col, (label, value) in enumerate([("Items", "4"), ("Qty", "500"), ("Total", "₱2,745.00")]):
-            ctk.CTkLabel(summary_grid, text=label, font=FONT_SMALL, text_color=TEXT_MUTED).grid(row=0, column=col, sticky="w")
-            ctk.CTkLabel(summary_grid, text=value, font=("Segoe UI", 10), text_color=TEXT_DARK).grid(row=1, column=col, sticky="w", pady=(1, 0))
+        for col, (label, value) in enumerate(
+            [("Items", "4"), ("Qty", "500"), ("Total", "₱2,745.00")]
+        ):
+            ctk.CTkLabel(
+                summary_grid, text=label, font=FONT_SMALL, text_color=TEXT_MUTED
+            ).grid(row=0, column=col, sticky="w")
+            ctk.CTkLabel(
+                summary_grid, text=value, font=("Segoe UI", 10), text_color=TEXT_DARK
+            ).grid(row=1, column=col, sticky="w", pady=(1, 0))
 
         # --- RBAC: Mark Received Masking ---
         self.mark_rcvd_btn = ctk.CTkButton(
-            card, text="⊞  Mark Received", height=32, corner_radius=6, 
-            fg_color="#ff3d1f", hover_color="#e33317", text_color="#ffffff", font=("Segoe UI", 11, "bold"),
-            command=self.handle_mark_received
+            card,
+            text="⊞  Mark Received",
+            height=32,
+            corner_radius=6,
+            fg_color="#ff3d1f",
+            hover_color="#e33317",
+            text_color="#ffffff",
+            font=("Segoe UI", 11, "bold"),
+            command=self.handle_mark_received,
         )
         self.mark_rcvd_btn.pack(fill="x", padx=10, pady=(0, 8))
 
         if self.role != "Manager":
-            self.mark_rcvd_btn.configure(state="disabled", fg_color="#bdc3c7", text_color="#7f8c8d")
+            self.mark_rcvd_btn.configure(
+                state="disabled", fg_color="#bdc3c7", text_color="#7f8c8d"
+            )
 
     def _build_bottleneck_card(self):
         card = self._create_card_container(self.right_panel)
@@ -419,11 +653,19 @@ class InventoryView(ctk.CTkFrame):
 
         hdr = ctk.CTkFrame(card, fg_color="transparent")
         hdr.pack(fill="x", padx=10, pady=(8, 4))
-        ctk.CTkLabel(hdr, text="⚠ Order Bottlenecks", font=FONT_SECTION, text_color=ACCENT_RED).pack(side="left")
+        ctk.CTkLabel(
+            hdr, text="⚠ Order Bottlenecks", font=FONT_SECTION, text_color=ACCENT_RED
+        ).pack(side="left")
         ctk.CTkButton(
-            hdr, text="↻", width=28, height=28, corner_radius=6,
-            fg_color="#f5f7fa", hover_color="#e8ecf2", text_color=TEXT_DARK,
-            command=self._refresh_bottlenecks
+            hdr,
+            text="↻",
+            width=28,
+            height=28,
+            corner_radius=6,
+            fg_color="#f5f7fa",
+            hover_color="#e8ecf2",
+            text_color=TEXT_DARK,
+            command=self._refresh_bottlenecks,
         ).pack(side="right")
 
         self._bottleneck_frame = ctk.CTkFrame(card, fg_color="transparent")
@@ -438,7 +680,7 @@ class InventoryView(ctk.CTkFrame):
             w.destroy()
 
         try:
-            conn = psycopg2.connect(**self.db_config)
+            conn = psycopg2.connect(**(self.db_config or {}))
             cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
             cur.execute("""
                 SELECT
@@ -459,48 +701,86 @@ class InventoryView(ctk.CTkFrame):
             cur.close()
             conn.close()
         except Exception as e:
-            ctk.CTkLabel(self._bottleneck_frame, text=f"DB Error: {e}", text_color=ACCENT_RED, font=FONT_SMALL).pack()
+            ctk.CTkLabel(
+                self._bottleneck_frame,
+                text=f"DB Error: {e}",
+                text_color=ACCENT_RED,
+                font=FONT_SMALL,
+            ).pack()
             return
 
         if not bottlenecks:
-            ctk.CTkLabel(self._bottleneck_frame, text="✓ No bottlenecks detected", font=FONT_SMALL, text_color=ACCENT_GREEN).pack(anchor="w")
+            ctk.CTkLabel(
+                self._bottleneck_frame,
+                text="✓ No bottlenecks detected",
+                font=FONT_SMALL,
+                text_color=ACCENT_GREEN,
+            ).pack(anchor="w")
             return
 
         for b in bottlenecks:
-            row = ctk.CTkFrame(self._bottleneck_frame, fg_color="#fff5f5", corner_radius=6)
+            row = ctk.CTkFrame(
+                self._bottleneck_frame, fg_color="#fff5f5", corner_radius=6
+            )
             row.pack(fill="x", pady=(0, 4))
-            ctk.CTkLabel(row, text=f"Part {b['part_number']} — {b['description'][:28]}", font=("Segoe UI", 10, "bold"), text_color=ACCENT_RED).pack(anchor="w", padx=8, pady=(4, 0))
-            ctk.CTkLabel(row, text=f"Stock: {b['stock_count']}  |  Blocking {b['blocked_order_count']} order(s)", font=FONT_SMALL, text_color=TEXT_MUTED).pack(anchor="w", padx=8, pady=(0, 4))
+            ctk.CTkLabel(
+                row,
+                text=f"Part {b['part_number']} — {b['description'][:28]}",
+                font=("Segoe UI", 10, "bold"),
+                text_color=ACCENT_RED,
+            ).pack(anchor="w", padx=8, pady=(4, 0))
+            ctk.CTkLabel(
+                row,
+                text=f"Stock: {b['stock_count']}  |  Blocking {b['blocked_order_count']} order(s)",
+                font=FONT_SMALL,
+                text_color=TEXT_MUTED,
+            ).pack(anchor="w", padx=8, pady=(0, 4))
 
     def _build_admin_actions_card(self):
         card = self._create_card_container(self.right_panel)
         card.pack(fill="x", pady=(0, 8))
 
-        ctk.CTkLabel(card, text="Admin Actions", font=FONT_SECTION, text_color=TEXT_DARK).pack(anchor="w", padx=10, pady=(8, 6))
+        ctk.CTkLabel(
+            card, text="Admin Actions", font=FONT_SECTION, text_color=TEXT_DARK
+        ).pack(anchor="w", padx=10, pady=(8, 6))
 
         self.restock_btn = ctk.CTkButton(
-            card, text="⟳ Apply Dynamic Restock", height=32, corner_radius=6,
-            fg_color=ACCENT_AMBER, hover_color="#d68910", text_color="#ffffff",
-            font=("Segoe UI", 11, "bold"), command=self.handle_apply_dynamic_restock
+            card,
+            text="⟳ Apply Dynamic Restock",
+            height=32,
+            corner_radius=6,
+            fg_color=ACCENT_AMBER,
+            hover_color="#d68910",
+            text_color="#ffffff",
+            font=("Segoe UI", 11, "bold"),
+            command=self.handle_apply_dynamic_restock,
         )
         self.restock_btn.pack(fill="x", padx=10, pady=(0, 6))
 
         self.inflate_btn = ctk.CTkButton(
-            card, text="↑ Apply Price Inflation", height=32, corner_radius=6,
-            fg_color=ACCENT_RED, hover_color="#c0392b", text_color="#ffffff",
-            font=("Segoe UI", 11, "bold"), command=self.handle_apply_price_inflation
+            card,
+            text="↑ Apply Price Inflation",
+            height=32,
+            corner_radius=6,
+            fg_color=ACCENT_RED,
+            hover_color="#c0392b",
+            text_color="#ffffff",
+            font=("Segoe UI", 11, "bold"),
+            command=self.handle_apply_price_inflation,
         )
         self.inflate_btn.pack(fill="x", padx=10, pady=(0, 8))
 
         if self.role != "Manager":
             for btn in (self.restock_btn, self.inflate_btn):
-                btn.configure(state="disabled", fg_color="#bdc3c7", text_color="#7f8c8d")
+                btn.configure(
+                    state="disabled", fg_color="#bdc3c7", text_color="#7f8c8d"
+                )
 
     def handle_apply_dynamic_restock(self):
         import psycopg2
 
         try:
-            conn = psycopg2.connect(**self.db_config)
+            conn = psycopg2.connect(**(self.db_config or {}))
             cur = conn.cursor()
 
             # Find top 2 parts by total quantity sold YTD
@@ -517,21 +797,30 @@ class InventoryView(ctk.CTkFrame):
             top_parts = [row[0] for row in cur.fetchall()]
 
             if not top_parts:
-                messagebox.showinfo("Dynamic Restock", "No YTD sales data found. Nothing updated.")
+                messagebox.showinfo(
+                    "Dynamic Restock", "No YTD sales data found. Nothing updated."
+                )
                 conn.close()
                 return
 
-            cur.execute("""
+            cur.execute(
+                """
                 UPDATE parts
                 SET restock_value = restock_value * 2
                 WHERE part_number = ANY(%s)
-            """, (top_parts,))
+            """,
+                (top_parts,),
+            )
 
             conn.commit()
             cur.close()
             conn.close()
 
-            messagebox.showinfo("Dynamic Restock", f"Restock value doubled for {len(top_parts)} part(s):\n" + "\n".join(str(p) for p in top_parts))
+            messagebox.showinfo(
+                "Dynamic Restock",
+                f"Restock value doubled for {len(top_parts)} part(s):\n"
+                + "\n".join(str(p) for p in top_parts),
+            )
             self._load_parts_data()
             self._refresh_parts_table_page()
 
@@ -545,13 +834,15 @@ class InventoryView(ctk.CTkFrame):
             "Confirm Price Inflation",
             "Increase prices for all parts with no YTD sales?\n\n"
             "• restock_value < 4  →  +10%\n"
-            "• restock_value ≥ 4  →  +20%\n\nContinue?"
+            "• restock_value ≥ 4  →  +20%\n\nContinue?",
         )
         if not confirm:
             return
 
+        self._ensure_active_session(["Manager"])
+
         try:
-            conn = psycopg2.connect(**self.db_config)
+            conn = psycopg2.connect(**(self.db_config or {}))
             cur = conn.cursor()
 
             # Fetch parts with zero YTD sales
@@ -569,7 +860,9 @@ class InventoryView(ctk.CTkFrame):
             zero_parts = cur.fetchall()
 
             if not zero_parts:
-                messagebox.showinfo("Price Inflation", "All parts have YTD sales. Nothing updated.")
+                messagebox.showinfo(
+                    "Price Inflation", "All parts have YTD sales. Nothing updated."
+                )
                 conn.close()
                 return
 
@@ -578,7 +871,7 @@ class InventoryView(ctk.CTkFrame):
                 multiplier = 1.10 if float(restock_value) < 4 else 1.20
                 cur.execute(
                     "UPDATE parts SET selling_price = selling_price * %s WHERE part_number = %s",
-                    (multiplier, part_number)
+                    (multiplier, part_number),
                 )
                 updated += 1
 
@@ -586,7 +879,9 @@ class InventoryView(ctk.CTkFrame):
             cur.close()
             conn.close()
 
-            messagebox.showinfo("Price Inflation", f"Updated prices for {updated} part(s).")
+            messagebox.showinfo(
+                "Price Inflation", f"Updated prices for {updated} part(s)."
+            )
             self._load_parts_data()
             self._refresh_parts_table_page()
 
@@ -597,16 +892,32 @@ class InventoryView(ctk.CTkFrame):
     # Helpers
     # ════════════════════════════════════════════════════════════════════
     def _create_card_container(self, parent):
-        return ctk.CTkFrame(parent, fg_color=CARD_BG, corner_radius=12, border_width=1, border_color=BORDER)
+        return ctk.CTkFrame(
+            parent,
+            fg_color=CARD_BG,
+            corner_radius=12,
+            border_width=1,
+            border_color=BORDER,
+        )
 
     def _create_form_field(self, parent, label, is_combo=False):
         frame = ctk.CTkFrame(parent, fg_color="transparent")
         frame.pack(fill="x", padx=10, pady=(0, 5))
-        ctk.CTkLabel(frame, text=label, font=FONT_SMALL, text_color=TEXT_MUTED).pack(anchor="w", pady=(0, 3))
+        ctk.CTkLabel(frame, text=label, font=FONT_SMALL, text_color=TEXT_MUTED).pack(
+            anchor="w", pady=(0, 3)
+        )
         if is_combo:
-            ctk.CTkComboBox(frame, values=["BIC Pens Blue (12pk)", "HP LaserJet Toner"], height=28, fg_color="#f5f7fa", border_color=BORDER).pack(fill="x")
+            ctk.CTkComboBox(
+                frame,
+                values=["BIC Pens Blue (12pk)", "HP LaserJet Toner"],
+                height=28,
+                fg_color="#f5f7fa",
+                border_color=BORDER,
+            ).pack(fill="x")
         else:
-            ctk.CTkEntry(frame, height=28, fg_color="#f5f7fa", border_color=BORDER).pack(fill="x")
+            ctk.CTkEntry(
+                frame, height=28, fg_color="#f5f7fa", border_color=BORDER
+            ).pack(fill="x")
 
     def _set_toggle_state(self, visible: bool):
         if hasattr(self, "toggle_btn") and self.toggle_btn is not None:
@@ -676,9 +987,15 @@ class InventoryView(ctk.CTkFrame):
         next_enabled = self._current_page < total_pages
 
         if hasattr(self, "prev_page_btn"):
-            self.prev_page_btn.configure(state="normal" if prev_enabled else "disabled", text_color="#6b7280" if prev_enabled else "#c4c9d1")
+            self.prev_page_btn.configure(
+                state="normal" if prev_enabled else "disabled",
+                text_color="#6b7280" if prev_enabled else "#c4c9d1",
+            )
         if hasattr(self, "next_page_btn"):
-            self.next_page_btn.configure(state="normal" if next_enabled else "disabled", text_color="#6b7280" if next_enabled else "#c4c9d1")
+            self.next_page_btn.configure(
+                state="normal" if next_enabled else "disabled",
+                text_color="#6b7280" if next_enabled else "#c4c9d1",
+            )
 
     def _go_prev_page(self):
         if self._current_page > 1:
@@ -705,7 +1022,7 @@ class InventoryView(ctk.CTkFrame):
             self._right_panel_visible = True
 
         self._set_toggle_state(self._right_panel_visible)
-    
+
     # ════════════════════════════════════════════════════════════════════
     # SECURE ACTION HANDLERS (Phase 3 Integration)
     # ════════════════════════════════════════════════════════════════════
@@ -715,8 +1032,10 @@ class InventoryView(ctk.CTkFrame):
         try:
             # Here you would typically open a modal/dialog, then call the backend:
             # self.controller.query_manager.add_part(data)
-            messagebox.showinfo("Inventory Management", "Opening 'Add New Part' dialog...")
-            
+            messagebox.showinfo(
+                "Inventory Management", "Opening 'Add New Part' dialog..."
+            )
+
         except PermissionError as e:
             # Caught by the @require_role decorator in the backend!
             messagebox.showerror("Security Override", str(e))
@@ -732,7 +1051,9 @@ class InventoryView(ctk.CTkFrame):
         supplier_name = self.supplier_combo.get()
 
         if not part_desc or not qty_str:
-            messagebox.showwarning("Validation", "Please select a part and enter a quantity.")
+            messagebox.showwarning(
+                "Validation", "Please select a part and enter a quantity."
+            )
             return
 
         try:
@@ -742,21 +1063,21 @@ class InventoryView(ctk.CTkFrame):
             return
 
         # Resolve part_number from description
-        part_number = next(
-            (r[0] for r in self._parts_rows if r[1] == part_desc), None
-        )
+        part_number = next((r[0] for r in self._parts_rows if r[1] == part_desc), None)
         if not part_number:
             messagebox.showerror("Error", "Could not resolve part number.")
             return
 
+        self._ensure_active_session(["Manager"])
+
         try:
-            conn = psycopg2.connect(**self.db_config)
+            conn = psycopg2.connect(**(self.db_config or {}))
             cur = conn.cursor()
 
             # Resolve supplier_id
             cur.execute(
                 "SELECT supplier_id FROM suppliers WHERE company_name = %s",
-                (supplier_name,)
+                (supplier_name,),
             )
             row = cur.fetchone()
             if not row:
@@ -768,29 +1089,34 @@ class InventoryView(ctk.CTkFrame):
             # Get unit cost from item_parts
             cur.execute(
                 "SELECT cost FROM item_parts WHERE part_number = %s AND supplier_id = %s",
-                (part_number, supplier_id)
+                (part_number, supplier_id),
             )
             cost_row = cur.fetchone()
             unit_cost = float(cost_row[0]) if cost_row else 0.0
 
             # Insert purchase order
-            cur.execute("""
+            cur.execute(
+                """
                 INSERT INTO purchase_orders
                     (part_number, supplier_id, quantity, unit_cost, received)
                 VALUES (%s, %s, %s, %s, FALSE)
-            """, (part_number, supplier_id, qty, unit_cost))
+            """,
+                (part_number, supplier_id, qty, unit_cost),
+            )
 
             # Mark part as on_order
             cur.execute(
                 "UPDATE parts SET on_order = TRUE WHERE part_number = %s",
-                (part_number,)
+                (part_number,),
             )
 
             conn.commit()
             cur.close()
             conn.close()
 
-            messagebox.showinfo("Success", f"PO submitted: {qty}x {part_desc} from {supplier_name}.")
+            messagebox.showinfo(
+                "Success", f"PO submitted: {qty}x {part_desc} from {supplier_name}."
+            )
             self._load_parts_data()
             self._refresh_parts_table_page()
 
@@ -798,7 +1124,7 @@ class InventoryView(ctk.CTkFrame):
             messagebox.showerror("Access Denied", str(e))
         except Exception as e:
             messagebox.showerror("DB Error", f"Failed to submit PO:\n{e}")
-            
+
     def handle_mark_received(self):
         import psycopg2
         from tkinter import messagebox
@@ -809,15 +1135,18 @@ class InventoryView(ctk.CTkFrame):
             return
 
         try:
-            conn = psycopg2.connect(**self.db_config)
+            conn = psycopg2.connect(**(self.db_config or {}))
             cur = conn.cursor()
 
             # Fetch the PO
-            cur.execute("""
+            cur.execute(
+                """
                 SELECT po_id, part_number, quantity, received
                 FROM purchase_orders
                 WHERE po_id = %s
-            """, (po_number,))
+            """,
+                (po_number,),
+            )
             po = cur.fetchone()
 
             if not po:
@@ -828,23 +1157,31 @@ class InventoryView(ctk.CTkFrame):
             po_id, part_number, quantity, already_received = po
 
             if already_received:
-                messagebox.showwarning("Already Received", "This PO has already been marked as received.")
+                messagebox.showwarning(
+                    "Already Received", "This PO has already been marked as received."
+                )
                 conn.close()
                 return
 
             # Update stock and mark PO received
-            cur.execute("""
+            cur.execute(
+                """
                 UPDATE parts
                 SET stock_count = stock_count + %s,
                     on_order = FALSE
                 WHERE part_number = %s
-            """, (quantity, part_number))
+            """,
+                (quantity, part_number),
+            )
 
-            cur.execute("""
+            cur.execute(
+                """
                 UPDATE purchase_orders
                 SET received = TRUE
                 WHERE po_id = %s
-            """, (po_id,))
+            """,
+                (po_id,),
+            )
 
             conn.commit()
             cur.close()

@@ -2,7 +2,7 @@
 
 **Generated:** May 8, 2026  
 **Project Status:** In Development (MVP+ Phase, core UI and several live DB-backed flows implemented)  
-**Overall Assessment:** Well-structured foundation with multiple implemented screens and role-based flows, but service-layer consolidation, testing, and some business rules still need completion
+**Overall Assessment:** Well-structured foundation with multiple implemented screens and role-based flows, with additional UI polish and collapsible panel behavior now added to the main operational tabs
 
 ---
 
@@ -40,8 +40,8 @@ national_office_supplies/
         │   ├── style_config.json (Empty - unused)
         │   └── logo*.png (3 logo variants)
         ├── backend/ (Database & session logic)
-        │   ├── database.py (Basic connection only)
-        │   └── session_manager.py (Empty - NOT IMPLEMENTED)
+      │   ├── database.py (Basic connection only)
+      │   └── session_manager.py (Implemented session lifecycle manager)
         ├── database/ (Empty - SQL schemas missing)
       ├── frontend/
         │   ├── modular/ (Reusable UI components)
@@ -74,7 +74,7 @@ national_office_supplies/
   - Backend/service modules are still thin compared to the UI
   - Database schema directory is still empty
   - No utilities for data validation
-  - Session management not implemented
+  - Session management implemented via backend/session_manager.py and wired into startup/login/logout
   - Style configuration not utilized
 
 ---
@@ -94,17 +94,17 @@ Based on code analysis, the system is designed to handle:
 
 ### Current Implementation Status
 
-| Feature                   | Status         | Notes                                                       |
-| ------------------------- | -------------- | ----------------------------------------------------------- |
-| User Login/Authentication | ✅ Functional   | Database-backed credential verification and session role population |
-| Dashboard Display         | ✅ Partial      | Role-aware metric cards with Decimal-safe live calculations  |
-| Navigation System         | ✅ Functional  | Sidebar with role-based filtering works                     |
-| Inventory Tracking        | ✅ Partial     | Inventory tab exists with live query scaffolding and alerts |
-| Customer Management       | ✅ Partial     | Customers tab supports lookup, editing, payments, and balance display |
-| Order Management          | ✅ Partial     | OrdersView exists with invoice flow and overselling guards  |
-| Payroll System            | ✅ Partial     | Role-based payroll UI is connected for manager/hourly/sales rep flows |
-| Reports Generation        | ✅ Partial     | ReportsHubView routes to live inventory, weekly sales, and stock ordering reports |
-| Database Operations       | ⚠️ Partial     | Connection code plus some tab-level queries and query manager |
+| Feature                   | Status        | Notes                                                                                                        |
+| ------------------------- | ------------- | ------------------------------------------------------------------------------------------------------------ |
+| User Login/Authentication | ✅ Functional | Database-backed credential verification and session role population                                          |
+| Dashboard Display         | ✅ Partial    | Role-aware metric cards with Decimal-safe live calculations                                                  |
+| Navigation System         | ✅ Functional | Sidebar with role-based filtering works                                                                      |
+| Inventory Tracking        | ✅ Partial    | Inventory tab exists with live query scaffolding and alerts                                                  |
+| Customer Management       | ✅ Partial    | Customers tab supports lookup, editing, payments, and balance display                                        |
+| Order Management          | ✅ Partial    | OrdersView exists with invoice flow and overselling guards                                                   |
+| Payroll System            | ✅ Partial    | Role-based payroll UI is connected for manager/hourly/sales rep flows                                        |
+| Reports Generation        | ✅ Functional | ReportsHubView routes to inventory, weekly sales, stock ordering, customer list, and payment history reports |
+| Database Operations       | ⚠️ Partial    | Connection code plus some tab-level queries and query manager                                                |
 
 ---
 
@@ -236,14 +236,14 @@ Based on code analysis, the system is designed to handle:
 ### ✅ Implemented / Active
 
 - **Customers Tab** - Functional view with search, edit popup, payment flow, and DB queries
-- **Inventory Tab** - Functional view with data-loading helpers and inventory report queries
+- **Inventory Tab** - Functional view with data-loading helpers, inventory report queries, and collapsible operational panels
+- **Orders & Invoices Tab** - Functional workflow with overselling guards, cancellation handling, and collapsible invoice panels
 - **Reports Tab** - Functional reports hub with weekly sales, inventory, and stock ordering views
-- **Payroll Tab** - Role-aware payroll UI connected to the database for manager, hourly, and sales rep flows
+- **Payroll Tab** - Role-aware payroll UI connected to the database for manager, hourly, and sales rep flows, with collapsible subpanels
 
 ### ❌ Not Implemented
 
-- **Customer List & Balances report** - Still pending
-- **Customer Payment History report** - Still pending
+- **Session Manager** (`backend/session_manager.py`) - Implemented and wired into startup/login/logout handling
 
 ---
 
@@ -278,11 +278,11 @@ def get_db_connection():
 - ❌ No transaction management
 - ❌ No prepared statements (SQL injection risk)
 
-### ❌ **Session Manager** (`backend/session_manager.py`)
+### ✅ **Session Manager** (`backend/session_manager.py`)
 
-**Status:** COMPLETELY EMPTY
+**Status:** IMPLEMENTED AND IN USE
 
-**Should contain:**
+**Provides:**
 
 - User session tracking
 - Role verification
@@ -465,8 +465,10 @@ def get_db_connection():
 ### Current Update Notes
 
 - `customers.py` now contains working customer search, balance display, payment handling, and edit popup flows.
-- `inventory.py` now contains implemented query-backed inventory reporting logic.
-- `reports.py` now contains a weekly sales report view with optional PostgreSQL loading and CSV export.
+- `inventory.py` now contains implemented query-backed inventory reporting logic and collapsible panel toggles.
+- `orders_and_invoices.py` now includes collapsible invoice panels while preserving the order/invoice workflow and validation guards.
+- `payroll.py` now includes collapsible manager panels while preserving the role-aware payroll workflow.
+- `reports.py` now routes the report hub across inventory, weekly sales, stock ordering, customer list & balances, and customer payment history views.
 - `navigation_bar.py` and `__main__.py` are now Pylance-clean after moving widget metadata and typing DB config values.
 - The database schema layer is still the main missing foundation; the app remains dependent on view-level queries and sample fallbacks.
 
@@ -524,18 +526,16 @@ def get_db_connection():
 
 ### 🔴 Critical Bugs/Issues
 
-| #   | Issue                            | Severity | Location             | Impact                          |
-| --- | -------------------------------- | -------- | -------------------- | ------------------------------- |
-| 1   | **No authentication**            | CRITICAL | login.py             | Anyone can access any role      |
-| 2   | **Role hardcoded to "Manager"**  | CRITICAL | **main**.py          | RBAC not functional             |
-| 3   | **Empty database schema**        | CRITICAL | database/            | App cannot run end-to-end       |
-| 4   | **Placeholder navigation**       | HIGH     | **main**.py          | Buttons don't work              |
-| 5   | **No error dialogs**             | HIGH     | All tabs             | Users can't see what went wrong |
-| 6   | **Hardcoded sample data**        | HIGH     | dashboard.py, alerts | Can't verify data binding       |
-| 7   | **Icon path errors possible**    | HIGH     | navigation_bar.py    | May crash if icons missing      |
-| 8   | **Session manager empty**        | HIGH     | session_manager.py   | Multi-user scenarios broken     |
-| 9   | **No input validation**          | HIGH     | login.py, forms      | Can inject invalid data         |
-| 10  | **Logo fallback path hardcoded** | MEDIUM   | login.py             | Fails if file structure changes |
+- **No authentication** - CRITICAL, `login.py`, anyone can access any role
+- **Role hardcoded to "Manager"** - CRITICAL, `__main__.py`, RBAC not functional
+- **Empty database schema** - CRITICAL, `database/`, app cannot run end-to-end
+- **Placeholder navigation** - HIGH, `__main__.py`, buttons don't work
+- **No error dialogs** - HIGH, all tabs, users can't see what went wrong
+- **Hardcoded sample data** - HIGH, `dashboard.py` and alerts, can't verify data binding
+- **Icon path errors possible** - HIGH, `navigation_bar.py`, may crash if icons missing
+- **Session timeout policy** - MEDIUM, `session_manager.py`, needs validation under long idle sessions
+- **No input validation** - HIGH, `login.py` and forms, can inject invalid data
+- **Logo fallback path hardcoded** - MEDIUM, `login.py`, fails if file structure changes
 
 ### 🟡 Moderate Issues
 
@@ -802,7 +802,7 @@ Urgency
 
 1. Create `.env` file with database credentials
 2. Create `database/schema.sql` with table definitions
-3. Implement `session_manager.py`
+3. Validate `session_manager.py` timeout and idle-expiry behavior
 4. Create `backend/dao/user_dao.py` for authentication
 
 ### Short-term (Week 1)
@@ -830,18 +830,16 @@ Urgency
 
 ## 14. Files That Require Immediate Attention
 
-| Priority | File                                       | Required Action             | Est. Lines |
-| -------- | ------------------------------------------ | --------------------------- | ---------- |
-| 🔴 P0    | `database/schema.sql`                      | Create table definitions    | 100+       |
-| 🔴 P0    | `backend/session_manager.py`               | Implement session tracking  | 100+       |
-| 🔴 P0    | `backend/dao/user_dao.py`                  | Create login queries        | 50+        |
-| 🔴 P0    | `utils/validators.py`                      | Add validation functions    | 80+        |
-| 🟠 P1    | `frontend/tabs/customers.py`               | Implement CRUD UI           | 150+       |
-| 🟠 P1    | `frontend/tabs/inventory.py`               | Implement stock management  | 150+       |
-| 🟠 P1    | `frontend/tabs/payroll.py`                 | Implement payroll display   | 120+       |
-| 🟠 P1    | `frontend/tabs/reports.py`                 | Implement report generation | 100+       |
-| 🟠 P1    | `backend/database.py`                      | Add query helper methods    | 50+        |
-| 🟡 P2    | `tests/test_national_office_supply_BIS.py` | Create test suite           | 200+       |
+- `database/schema.sql` - Create table definitions
+- `backend/session_manager.py` - Implemented session tracking
+- `backend/dao/user_dao.py` - Create login queries
+- `utils/validators.py` - Add validation functions
+- `frontend/tabs/customers.py` - Implement CRUD UI
+- `frontend/tabs/inventory.py` - Implement stock management
+| 🟠 P1    | `frontend/tabs/payroll.py`                 | Implement payroll display    | 120+       |
+| 🟠 P1    | `frontend/tabs/reports.py`                 | Implement report generation  | 100+       |
+| 🟠 P1    | `backend/database.py`                      | Add query helper methods     | 50+        |
+| 🟡 P2    | `tests/test_national_office_supply_BIS.py` | Create test suite            | 200+       |
 
 **Estimated Total New Code:** 1000+ lines needed for functional MVP
 

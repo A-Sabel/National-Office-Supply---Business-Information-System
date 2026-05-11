@@ -86,7 +86,7 @@ class LoginView(ctk.CTkFrame):
             print(f"[AUTH] Login successful for: {username}")
 
             # 2. POPULATE THE SESSION (The crucial RBAC step!)
-            self.controller.session.login(
+            self.controller.session_manager.start_session(
                 employee_number=user_data["employee_number"],
                 employee_name=user_data["employee_name"],
                 role=user_data["position"],

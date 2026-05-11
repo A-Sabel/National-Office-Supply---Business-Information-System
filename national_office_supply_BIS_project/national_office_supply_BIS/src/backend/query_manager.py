@@ -13,10 +13,11 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from backend.database import get_db_connection
+from backend.session_manager import SessionManager
 from utils.auth_guard import require_role
 
 # Assuming AppSession is in utils.session
-from utils.session import AppSession 
+from utils.session import AppSession
 
 QD_SECTION_PATTERN = re.compile(
     r"^\s*--\s*(QD-Sec[\w-]+)\s*:\s*(.+?)\s*$",
@@ -27,6 +28,7 @@ QD_SECTION_PATTERN = re.compile(
 @dataclass(frozen=True)
 class QueryResult:
     """Simple container for query output."""
+
     columns: tuple[str, ...]
     rows: list[dict[str, Any]]
 
@@ -34,10 +36,17 @@ class QueryResult:
 class QueryManager:
     """Load and execute named QD queries and handle secure DB transactions."""
 
-    def __init__(self, session: AppSession, queries_path: str | Path | None = None) -> None:
+    def __init__(
+        self,
+        session: AppSession | SessionManager,
+        queries_path: str | Path | None = None,
+    ) -> None:
         # INJECT THE SESSION: This is the core of backend RBAC
-        self.session = session
-        
+        self.session_manager = session if isinstance(session, SessionManager) else None
+        self.session = (
+            session.session if isinstance(session, SessionManager) else session
+        )
+
         self.queries_path = (
             Path(queries_path) if queries_path else self._default_queries_path()
         )
@@ -100,12 +109,22 @@ class QueryManager:
                 f"Unknown QD query '{section_name}'. Available sections: {available}"
             ) from exc
 
+    def _ensure_active_session(
+        self, allowed_roles: Iterable[str] | None = None
+    ) -> None:
+        """Validate the active session when a SessionManager is available."""
+        if self.session_manager is not None:
+            self.session_manager.ensure_active(allowed_roles)
+
     # ==========================================
     # 1. READ OPERATIONS (QD-SEC)
     # ==========================================
 
-    def run_query(self, section_name: str, params: dict[str, Any] | None = None) -> QueryResult:
+    def run_query(
+        self, section_name: str, params: dict[str, Any] | None = None
+    ) -> QueryResult:
         """Executes a parsed QD-Sec query. Open to all logged-in users (UI handles tab hiding)."""
+        self._ensure_active_session()
         query = self.get_query(section_name)
         return self._execute_sql(query, params)
 
@@ -116,28 +135,39 @@ class QueryManager:
     @require_role(["Manager"])
     def update_part_price(self, part_number: int, new_price: float) -> QueryResult:
         """Only Managers can update inventory pricing."""
-        print(f"[AUDIT] Manager {self.session.employee_name} updating price for part {part_number}")
+        self._ensure_active_session(["Manager"])
+        print(
+            f"[AUDIT] Manager {self.session.employee_name} updating price for part {part_number}"
+        )
         query = "UPDATE parts SET selling_price = %(price)s WHERE part_number = %(part)s RETURNING part_number;"
         return self._execute_sql(query, {"price": new_price, "part": part_number})
 
     @require_role(["Manager"])
     def generate_weekly_timecards(self, week_date: str) -> QueryResult:
         """Only Managers can trigger payroll generation."""
+        self._ensure_active_session(["Manager"])
         # Add actual insert logic for timecards here
-        print(f"[AUDIT] Manager {self.session.employee_name} generating timecards for {week_date}")
+        print(
+            f"[AUDIT] Manager {self.session.employee_name} generating timecards for {week_date}"
+        )
         return QueryResult(columns=tuple(), rows=[])
 
     @require_role(["Manager", "Sales Rep"])
     def create_invoice(self, customer_number: int) -> QueryResult:
         """Managers and Reps can create orders. Hourly staff cannot."""
+        self._ensure_active_session(["Manager", "Sales Rep"])
         query = "INSERT INTO invoices (customer_number, employee_number) VALUES (%(cust)s, %(emp)s) RETURNING invoice_id;"
-        return self._execute_sql(query, {"cust": customer_number, "emp": self.session.employee_number})
+        return self._execute_sql(
+            query, {"cust": customer_number, "emp": self.session.employee_number}
+        )
 
     # ==========================================
     # INTERNAL DB EXECUTOR
     # ==========================================
 
-    def _execute_sql(self, query: str, params: dict[str, Any] | None = None) -> QueryResult:
+    def _execute_sql(
+        self, query: str, params: dict[str, Any] | None = None
+    ) -> QueryResult:
         connection = get_db_connection()
         if connection is None:
             raise ConnectionError("Could not open a database connection.")
@@ -149,7 +179,7 @@ class QueryManager:
                     # If it's an INSERT/UPDATE without RETURNING, description is None
                     if cursor.description is None:
                         return QueryResult(columns=tuple(), rows=[])
-                    
+
                     columns = tuple(column[0] for column in cursor.description)
                     rows = [dict(zip(columns, row)) for row in cursor.fetchall()]
                     return QueryResult(columns=columns, rows=rows)

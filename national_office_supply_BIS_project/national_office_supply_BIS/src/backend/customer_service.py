@@ -8,6 +8,8 @@ CustomersView delegates to this instead of calling psycopg2 directly.
 import psycopg2
 from decimal import Decimal
 
+from backend.session_manager import SessionManager
+
 
 class CustomerService:
     """
@@ -42,8 +44,9 @@ class CustomerService:
         FROM customers
     """
 
-    def __init__(self, db_config: dict):
+    def __init__(self, db_config: dict, session_manager: SessionManager | None = None):
         self._cfg = db_config
+        self._session_manager = session_manager
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -74,6 +77,10 @@ class CustomerService:
         finally:
             conn.close()
 
+    def _ensure_active_session(self) -> None:
+        if self._session_manager is not None:
+            self._session_manager.ensure_active()
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -100,7 +107,9 @@ class CustomerService:
             cust_id = None
 
         if cust_id is not None:
-            sql = self._SELECT_COLS + " WHERE customer_number = %s ORDER BY company_name;"
+            sql = (
+                self._SELECT_COLS + " WHERE customer_number = %s ORDER BY company_name;"
+            )
             return self._exec(sql, (cust_id,), fetch="all") or []
 
         like = f"%{term}%"
@@ -126,8 +135,13 @@ class CustomerService:
         if row is None:
             return None
         keys = [
-            "customer_number", "company_name", "customer_name",
-            "phone_number", "address", "current_balance", "is_active",
+            "customer_number",
+            "company_name",
+            "customer_name",
+            "phone_number",
+            "address",
+            "current_balance",
+            "is_active",
         ]
         return dict(zip(keys, row))
 
@@ -144,6 +158,7 @@ class CustomerService:
         Uses MAX(customer_number)+1 for the ID (no sequence dependency).
         Returns the new customer_number.
         """
+        self._ensure_active_session()
         sql = """
             INSERT INTO customers (
                 customer_number, company_name, customer_name,
@@ -178,6 +193,7 @@ class CustomerService:
         Update all editable fields for an existing customer.
         Raises on DB error.
         """
+        self._ensure_active_session()
         sql = """
             UPDATE customers
             SET company_name     = %s,
@@ -209,6 +225,7 @@ class CustomerService:
         Returns the new balance.
         Raises RuntimeError if the customer is not found.
         """
+        self._ensure_active_session()
         sql = """
             UPDATE customers
             SET current_balance = current_balance + %s
@@ -226,6 +243,7 @@ class CustomerService:
         Does NOT physically delete the row (preserves invoice history).
         Raises RuntimeError if the customer has un-voided / unpaid invoices.
         """
+        self._ensure_active_session()
         # Guard: block deactivation if there are open invoices
         check_sql = """
             SELECT COUNT(*) FROM invoices

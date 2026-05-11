@@ -14,6 +14,8 @@ update_balance(cust_id, delta)                           → new balance (Decima
 import psycopg2
 from decimal import Decimal
 
+from backend.session_manager import SessionManager
+
 
 class PaymentService:
     """
@@ -21,8 +23,9 @@ class PaymentService:
     and the balance side-effects on the `customers` table.
     """
 
-    def __init__(self, db_config: dict):
+    def __init__(self, db_config: dict, session_manager: SessionManager | None = None):
         self._cfg = db_config
+        self._session_manager = session_manager
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -30,6 +33,10 @@ class PaymentService:
 
     def _connect(self):
         return psycopg2.connect(**self._cfg)
+
+    def _ensure_active_session(self) -> None:
+        if self._session_manager is not None:
+            self._session_manager.ensure_active()
 
     # ------------------------------------------------------------------
     # Public API
@@ -63,6 +70,7 @@ class PaymentService:
         ValueError  invalid method or non-positive amount
         RuntimeError  customer not found in DB
         """
+        self._ensure_active_session()
         if amount <= 0:
             raise ValueError("Payment amount must be positive.")
         method = method.strip().lower()
@@ -157,6 +165,7 @@ class PaymentService:
         Set invoices.status = 'paid' for the given invoice_id.
         Typically called after cumulative payments >= invoice total_amount.
         """
+        self._ensure_active_session()
         sql = """
             UPDATE invoices
             SET status = 'paid'
@@ -180,6 +189,7 @@ class PaymentService:
         Returns the new balance.
         Raises RuntimeError if the customer is not found.
         """
+        self._ensure_active_session()
         sql = """
             UPDATE customers
             SET current_balance = current_balance + %s

@@ -4,7 +4,7 @@ import customtkinter as ctk
 from dotenv import load_dotenv
 
 # --- ADD THESE IMPORTS ---
-from utils.session import AppSession
+from backend.session_manager import SessionManager
 from frontend.tabs.login import LoginView
 
 # -------------------------
@@ -16,7 +16,7 @@ from frontend.tabs.customers import CustomersView
 from frontend.tabs.inventory import InventoryView
 from frontend.tabs.orders_and_invoices import OrdersView
 from frontend.tabs.reports_tab.reports import DBConfig, ReportsHubView
-from frontend.tabs.payroll import PayrollView #, auto_generate_timecards
+from frontend.tabs.payroll import PayrollView  # , auto_generate_timecards
 
 load_dotenv()
 
@@ -39,8 +39,9 @@ class NationalOfficeApp(ctk.CTk):
             "port": int(os.getenv("DB_PORT", 5432)),
         }
 
-        # 2. Initialize the Global Session
-        self.session = AppSession()
+        # 2. Initialize the Global Session Manager
+        self.session_manager = SessionManager()
+        self.session = self.session_manager.session
 
         # 3. Start at the Login Screen
         self.show_login()
@@ -86,13 +87,13 @@ class NationalOfficeApp(ctk.CTk):
 
         # 6. Load the Dashboard
         self.show_dashboard()
-        
-        #7. Auto-generate timecards for the current week
-        #auto_generate_timecards(self.db_config)
+
+        # 7. Auto-generate timecards for the current week
+        # auto_generate_timecards(self.db_config)
 
     def logout(self):
         """Clears session and returns to login."""
-        self.session.logout()
+        self.session_manager.logout()
         self.show_login()
 
     # ==========================================
@@ -143,13 +144,14 @@ class NationalOfficeApp(ctk.CTk):
     def show_payroll(self):
         self._clear_content()
         self.current_view = PayrollView(
-            self.content_container, self,
+            self.content_container,
+            self,
             role=self.session.role or "Manager",
             db_config=self.db_config,
             employee_number=self.session.employee_number,
         )
         self.current_view.grid(row=0, column=0, sticky="nsew")
-        
+
 
 if __name__ == "__main__":
     app = NationalOfficeApp()
