@@ -60,13 +60,15 @@ class PaymentService:
 
         Raises
         ------
-        ValueError  – invalid method or non-positive amount
-        RuntimeError – customer not found in DB
+        ValueError  invalid method or non-positive amount
+        RuntimeError  customer not found in DB
         """
         if amount <= 0:
             raise ValueError("Payment amount must be positive.")
         method = method.strip().lower()
-        if method not in ("cash", "check", "transfer"):
+
+        if method not in ("Cash", "Check", "Transfer"):
+
             raise ValueError(f"Invalid payment method: '{method}'. Must be cash, check, or transfer.")
 
         conn = self._connect()
