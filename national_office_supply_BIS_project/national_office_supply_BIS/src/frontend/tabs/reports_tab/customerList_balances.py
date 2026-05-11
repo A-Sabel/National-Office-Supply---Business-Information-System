@@ -435,7 +435,7 @@ class CustomerListReportView(ctk.CTkFrame):
         self._populate_balances()
         return frame
 
-    def _populate_balances(self):
+    def _populate_balances(self, data=None):
         tree = self._balances_tree
         tree.delete(*tree.get_children())
         # Key by int (from DB) so lookup works whether sample or live data
@@ -446,7 +446,7 @@ class CustomerListReportView(ctk.CTkFrame):
             except Exception:
                 cust_company[c[0]] = c[1]
 
-        for inv in self.invoices:
+        for inv in (data if data is not None else self.invoices):
             inv_no, cust_no, inv_date, amount, is_paid, is_shipped = inv
 
             if isinstance(inv_date, str):
@@ -554,7 +554,9 @@ class CustomerListReportView(ctk.CTkFrame):
         query        = self._search_var.get().lower()
         status       = self._status_var.get()
         balance_only = self._balance_var.get()
-        filtered = [
+
+        # ── Customer List tab filter ──────────────────────────────
+        filtered_customers = [
             c for c in self.customers
             if (not query or
                 query in str(c[0]).lower() or
@@ -563,7 +565,39 @@ class CustomerListReportView(ctk.CTkFrame):
             and (status == "All" or c[5] == status)
             and (not balance_only or float(c[4] or 0) > 0)
         ]
-        self._populate_customers(filtered)
+        self._populate_customers(filtered_customers)
+
+        # ── Account Balances tab filter ───────────────────────────
+        cust_info = {}
+        for c in self.customers:
+            try:
+                key = int(c[0])
+            except Exception:
+                key = c[0]
+            cust_info[key] = (c[1], c[5])  # company, status
+
+        filtered_invoices = []
+        for inv in self.invoices:
+            inv_no, cust_no, inv_date, amount, is_paid, is_shipped = inv
+            try:
+                cust_key = int(cust_no)
+            except Exception:
+                cust_key = cust_no
+            cust_label = f"C-{cust_key:04d}" if isinstance(cust_key, int) else str(cust_key)
+            company, cust_status = cust_info.get(cust_key, ("", "Active"))
+
+            if query and not any(
+                query in str(v).lower()
+                for v in (cust_label, company, str(inv_no))
+            ):
+                continue
+            if status != "All" and cust_status != status:
+                continue
+            if balance_only and float(amount or 0) <= 0:
+                continue
+            filtered_invoices.append(inv)
+
+        self._populate_balances(filtered_invoices)
 
     # ── CSV export ────────────────────────────────────────────────────────────
     def _export_csv(self):
