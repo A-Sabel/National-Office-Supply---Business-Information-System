@@ -108,6 +108,9 @@ CREATE TABLE item_parts (
     PRIMARY KEY (part_number, supplier_id)
 );
 
+ALTER TABLE item_parts 
+ADD CONSTRAINT unique_part_supplier UNIQUE (part_number, supplier_id);
+
 COMMENT ON TABLE  item_parts       IS 'Maps which supplier sells which part, and at what cost to NOS.';
 COMMENT ON COLUMN item_parts.cost  IS 'Purchase cost NOS pays — distinct from parts.selling_price.';
 
