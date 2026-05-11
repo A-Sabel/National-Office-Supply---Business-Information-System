@@ -432,6 +432,12 @@ class InventoryView(ctk.CTkFrame):
         ctk.CTkLabel(supp_frame, text="Supplier", font=FONT_SMALL, text_color=TEXT_MUTED).pack(anchor="w")
         self.supplier_combo = ctk.CTkComboBox(supp_frame, values=self._fetch_suppliers(), height=28, fg_color="#f5f7fa")
         self.supplier_combo.pack(fill="x", pady=(2, 0))
+        
+        self.supplier_combo.configure(command=lambda _: self._update_po_sidebar_total())
+        self.po_qty_entry.bind("<KeyRelease>", lambda _: self._update_po_sidebar_total())
+
+        self.po_total_label = ctk.CTkLabel(card, text="Total: ₱0.00", font=("Segoe UI", 16, "bold"), text_color=TEXT_DARK)
+        self.po_total_label.pack(anchor="e", padx=15, pady=(10, 0))
 
         self.submit_po_btn = ctk.CTkButton(card, text="✈ Submit PO", height=32, corner_radius=6, fg_color=BRAND_BLUE, hover_color="#2980b9", font=("Segoe UI", 11, "bold"), command=self.handle_submit_po)
         self.submit_po_btn.pack(fill="x", padx=10, pady=(10, 8))
@@ -477,6 +483,8 @@ class InventoryView(ctk.CTkFrame):
 
         except Exception as e:
             print(f"[DB ERROR] Failed to auto-suggest supplier: {e}")
+            
+        self._update_po_sidebar_total()
 
     def _build_bottleneck_card(self):
         card = self._create_card_container(self.right_panel)
@@ -883,6 +891,38 @@ class InventoryView(ctk.CTkFrame):
         if self._current_page < total_pages:
             self._current_page += 1
             self._refresh_parts_table_page()
+            
+    def _update_po_sidebar_total(self, *_):
+        part_desc = getattr(self, 'po_part_combo', None)
+        supplier_name = getattr(self, 'supplier_combo', None)
+        qty_entry = getattr(self, 'po_qty_entry', None)
+        
+        if not part_desc or not supplier_name or not qty_entry: return
+        
+        part_desc = part_desc.get().strip()
+        supplier_name = supplier_name.get().strip().split(" — ")[0]
+        qty_str = qty_entry.get().strip()
+        
+        unit_cost = 0.0
+        part_number = next((r[0] for r in self._parts_rows if r[1] == part_desc), None)
+        
+        if part_number and supplier_name:
+            try:
+                import psycopg2
+                conn = psycopg2.connect(**(self.db_config or {}))
+                cur = conn.cursor()
+                cur.execute("SELECT ip.cost FROM item_parts ip JOIN suppliers s ON s.supplier_id = ip.supplier_id WHERE ip.part_number = %s AND s.company_name = %s", (part_number, supplier_name))
+                row = cur.fetchone()
+                conn.close()
+                if row: unit_cost = float(row[0])
+            except Exception: pass
+            
+        try:
+            qty = int(qty_str) if qty_str else 0
+            total = unit_cost * qty
+            if hasattr(self, 'po_total_label'): self.po_total_label.configure(text=f"Total: ₱{total:,.2f}")
+        except ValueError:
+            if hasattr(self, 'po_total_label'): self.po_total_label.configure(text="Total: ₱0.00")
 
     # ════════════════════════════════════════════════════════════════════
     # TAB 2: REORDERING
@@ -893,9 +933,9 @@ class InventoryView(ctk.CTkFrame):
 
         form_panel = ctk.CTkFrame(self.tab_reorder, fg_color=CARD_BG, corner_radius=12, border_width=1, border_color=BORDER)
         form_panel.grid(row=0, column=0, sticky="ew", pady=(0, 10), padx=5)
-        form_panel.columnconfigure((0, 1, 2, 3, 4), weight=1)
+        form_panel.columnconfigure((0, 1, 2, 3, 4, 5), weight=1)
 
-        ctk.CTkLabel(form_panel, text="New Reorder Entry", font=FONT_SECTION).grid(row=0, column=0, columnspan=5, padx=15, pady=(10, 6), sticky="w")
+        ctk.CTkLabel(form_panel, text="New Reorder Entry", font=FONT_SECTION).grid(row=0, column=0, columnspan=6, padx=15, pady=(10, 6), sticky="w")
         
        # Changed label to indicate they can search
         ctk.CTkLabel(form_panel, text="Part (Type to search...)", font=FONT_SMALL, text_color=TEXT_MUTED).grid(row=1, column=0, padx=(15, 5), sticky="w")
@@ -944,7 +984,18 @@ class InventoryView(ctk.CTkFrame):
         self._reorder_unit_cost_var = tk.StringVar(value="₱0.00")
         ctk.CTkEntry(form_panel, textvariable=self._reorder_unit_cost_var, state="disabled", width=110, fg_color="#f5f7fa").grid(row=2, column=3, padx=5, pady=(0, 10), sticky="ew")
 
-        ctk.CTkButton(form_panel, text="+ Stock Reorder", fg_color=ACCENT_GREEN, font=("Segoe UI", 11, "bold"), width=130, command=self._submit_to_reorder_list).grid(row=2, column=4, padx=(5, 15), pady=(0, 10), sticky="ew")
+        ctk.CTkLabel(form_panel, text="Total Cost", font=FONT_SMALL, text_color=TEXT_MUTED).grid(row=1, column=4, padx=5, sticky="w")
+        self._reorder_total_cost_var = tk.StringVar(value="₱0.00")
+        ctk.CTkEntry(
+            form_panel, textvariable=self._reorder_total_cost_var, state="disabled", 
+            width=110, fg_color="#e8f5e9", text_color="#2e7d32" # Slightly green tint to stand out
+        ).grid(row=2, column=4, padx=5, pady=(0, 10), sticky="ew")
+
+        # Shifted button to column 5
+        ctk.CTkButton(
+            form_panel, text="+ Restock Ordert", fg_color=ACCENT_GREEN, font=("Segoe UI", 11, "bold"), 
+            width=130, command=self._submit_to_reorder_list
+        ).grid(row=2, column=5, padx=(5, 15), pady=(0, 10), sticky="ew")
 
         list_frame = ctk.CTkFrame(self.tab_reorder, fg_color=CARD_BG, corner_radius=10, border_width=1, border_color=BORDER)
         list_frame.grid(row=1, column=0, sticky="nsew", padx=5)
@@ -1019,37 +1070,37 @@ class InventoryView(ctk.CTkFrame):
         raw_sku_selection = getattr(self, 'reorder_sku', None)
         raw_supp_selection = getattr(self, 'reorder_supp', None)
         
-        if not raw_sku_selection or not raw_supp_selection:
-            return
+        if not raw_sku_selection or not raw_supp_selection: return
             
         raw_sku_selection = raw_sku_selection.get().strip()
-        supplier_name = raw_supp_selection.get().strip()
+        supplier_name = raw_supp_selection.get().strip().split(" — ")[0]
         
-        if not raw_sku_selection or " - " not in raw_sku_selection or not supplier_name: 
-            if hasattr(self, '_reorder_unit_cost_var'):
-                self._reorder_unit_cost_var.set("₱0.00")
-            return
-            
-        sku = raw_sku_selection.split(" - ")[0]
+        unit_cost = 0.0
         
-        try:
-            import psycopg2
-            conn = psycopg2.connect(**(self.db_config or {}))
-            cur = conn.cursor()
-            cur.execute("""
-                SELECT ip.cost FROM item_parts ip 
-                JOIN suppliers s ON s.supplier_id = ip.supplier_id 
-                WHERE ip.part_number = %s AND s.company_name = %s
-            """, (sku, supplier_name))
-            row = cur.fetchone()
-            conn.close()
+        if raw_sku_selection and " - " in raw_sku_selection and supplier_name: 
+            sku = raw_sku_selection.split(" - ")[0]
+            try:
+                import psycopg2
+                conn = psycopg2.connect(**(self.db_config or {}))
+                cur = conn.cursor()
+                cur.execute("SELECT ip.cost FROM item_parts ip JOIN suppliers s ON s.supplier_id = ip.supplier_id WHERE ip.part_number = %s AND s.company_name = %s", (sku, supplier_name))
+                row = cur.fetchone()
+                conn.close()
+                if row: unit_cost = float(row[0])
+            except Exception: pass
             
-            if hasattr(self, '_reorder_unit_cost_var'):
-                self._reorder_unit_cost_var.set(f"₱{float(row[0]):,.2f}" if row else "₱0.00")
-        except Exception as e:
-            print(f"[DB ERROR] Update cost preview: {e}")
-            if hasattr(self, '_reorder_unit_cost_var'):
-                self._reorder_unit_cost_var.set("₱0.00")
+        # Update Unit Cost Field
+        if hasattr(self, '_reorder_unit_cost_var'):
+            self._reorder_unit_cost_var.set(f"₱{unit_cost:,.2f}")
+
+        if hasattr(self, '_reorder_total_cost_var'):
+            try:
+                qty_str = self.reorder_qty.get().strip()
+                qty = int(qty_str) if qty_str else 0
+                total = unit_cost * qty
+                self._reorder_total_cost_var.set(f"₱{total:,.2f}")
+            except ValueError:
+                self._reorder_total_cost_var.set("₱0.00")
 
     def _submit_to_reorder_list(self):
         raw_sku_selection = self.reorder_sku.get().strip()
@@ -1225,10 +1276,28 @@ class InventoryView(ctk.CTkFrame):
         right.columnconfigure(0, weight=1)
         right.rowconfigure(1, weight=1)
 
+        # --- Supplier List Header with Search Bar ---
         supp_hdr = ctk.CTkFrame(right, fg_color="transparent")
         supp_hdr.grid(row=0, column=0, sticky="ew", padx=14, pady=(12, 6))
+        
         ctk.CTkLabel(supp_hdr, text="Supplier List", font=FONT_SECTION, text_color=TEXT_DARK).pack(side="left")
+        
+        ctk.CTkButton(
+            supp_hdr, text="↻", width=32, height=32, corner_radius=6, 
+            fg_color="#f3f5f8", hover_color="#e0e4eb", text_color=TEXT_DARK, 
+            command=self._load_supplier_list
+        ).pack(side="right")
 
+        self._supp_search_var = tk.StringVar()
+        self._supp_search_var.trace_add("write", lambda *_: self._apply_supplier_search())
+        
+        ctk.CTkEntry(
+            supp_hdr, textvariable=self._supp_search_var, 
+            placeholder_text="Search by name, phone, or address...", 
+            height=32, fg_color="#f5f7fa", border_color=BORDER
+        ).pack(side="right", fill="x", expand=True, padx=(15, 10))
+        # -------------------------------------------------
+        
         supp_cols = ("ID", "Company Name", "Phone", "Address")
         self.supp_tree = ttk.Treeview(right, columns=supp_cols, show="headings", style="Parts.Treeview")
         for col in supp_cols: self.supp_tree.heading(col, text=col)
@@ -1332,15 +1401,49 @@ class InventoryView(ctk.CTkFrame):
         except Exception as e: messagebox.showerror("DB Error", str(e))
 
     def _load_supplier_list(self):
-        if not self.supp_tree: return
-        self.supp_tree.delete(*self.supp_tree.get_children())
+        """Fetches from DB once and stores in memory for fast searching."""
+        if not getattr(self, 'supp_tree', None): return 
+        
         try:
+            import psycopg2
             conn = psycopg2.connect(**(self.db_config or {}))
             cur = conn.cursor()
             cur.execute("SELECT supplier_id, company_name, phone_number, address FROM suppliers ORDER BY company_name")
-            for r in cur.fetchall(): self.supp_tree.insert("", "end", values=r)
+            
+            # Store full list in memory
+            self._supplier_rows = cur.fetchall() 
+            self._filtered_supplier_rows = list(self._supplier_rows)
+            
             conn.close()
-        except Exception as e: return messagebox.showerror("DB Error", str(e))
+            self._refresh_supplier_table()
+        except Exception as e: 
+            import tkinter.messagebox as messagebox
+            messagebox.showerror("DB Error", str(e))
+
+    def _apply_supplier_search(self):
+        """Filters the stored list instantly as the user types."""
+        query = self._supp_search_var.get().lower()
+        
+        if not query:
+            self._filtered_supplier_rows = list(getattr(self, '_supplier_rows', []))
+        else:
+            self._filtered_supplier_rows = []
+            for r in getattr(self, '_supplier_rows', []):
+                # Search across Company Name, Phone, and Address
+                if (query in str(r[1] or "").lower() or 
+                    query in str(r[2] or "").lower() or 
+                    query in str(r[3] or "").lower()):
+                    self._filtered_supplier_rows.append(r)
+                    
+        self._refresh_supplier_table()
+
+    def _refresh_supplier_table(self):
+        if self.supp_tree is None: 
+            return
+        
+        self.supp_tree.delete(*self.supp_tree.get_children())
+        for r in getattr(self, '_filtered_supplier_rows', []): 
+            self.supp_tree.insert("", "end", values=r)
     
     def _show_supplier_parts_modal(self):
         if not self.supp_tree: return
