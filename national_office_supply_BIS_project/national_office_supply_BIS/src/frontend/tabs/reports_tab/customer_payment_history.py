@@ -165,7 +165,19 @@ class CustomerPaymentHistoryView(ctk.CTkFrame):
                         cp.payment_date,
                         cp.amount_paid,
                         cp.payment_method,
-                        c.current_balance
+                        -- balance_after = balance right after THIS payment was applied.
+                        -- current_balance = balance NOW (all payments already deducted).
+                        -- To reconstruct the historical balance, add back all payments
+                        -- that came AFTER this one (they reduced the balance further).
+                        -- ASC order + ROWS 1 FOLLOWING TO UNBOUNDED FOLLOWING = "all newer payments".
+                        -- COALESCE handles the newest payment (no newer rows → add 0).
+                        c.current_balance + COALESCE(
+                            SUM(cp.amount_paid) OVER (
+                                PARTITION BY cp.customer_number
+                                ORDER BY cp.payment_date ASC, cp.payment_id ASC
+                                ROWS BETWEEN 1 FOLLOWING AND UNBOUNDED FOLLOWING
+                            ), 0
+                        ) AS balance_after
                     FROM   customer_payments cp
                     JOIN   customers c ON c.customer_number = cp.customer_number
                     ORDER  BY cp.payment_date DESC, cp.payment_id DESC
@@ -330,12 +342,12 @@ class CustomerPaymentHistoryView(ctk.CTkFrame):
         note.grid(row=0, column=0, sticky="ew", padx=16, pady=(14, 4))
         ctk.CTkLabel(
             note,
-            text="💰  Chronological log of every payment received — linked to customer and invoice, with method and account balance after each transaction.",
+            text="💰  Chronological log of every payment received — linked to customer and invoice, with balance before and after each transaction.",
             font=FONT_SMALL, text_color="#1a5276",
         ).pack(anchor="w", padx=10, pady=6)
 
-        cols   = ("Pay. ID",  "Customer No.", "Company",    "Invoice No.", "Payment Date", "Amount Paid", "Method",   "Balance After")
-        widths = (70,          110,             220,           110,           120,            120,           90,          130)
+        cols   = ("Pay. ID",  "Customer No.", "Company",    "Invoice No.", "Payment Date", "Balance Before", "Amount Paid", "Method",   "Balance After")
+        widths = (70,          110,             220,           110,           120,            130,              120,           90,          130)
 
         self._tree = self._make_treeview(card, cols, widths, row=1)
         self._tree.tag_configure("check",    foreground=BRAND_NAVY)
@@ -364,6 +376,7 @@ class CustomerPaymentHistoryView(ctk.CTkFrame):
             if inv_id is None:
                 tag = "general"
 
+            bal_before = (float(bal_after) + float(amount)) if bal_after is not None else None
             self._tree.insert("", "end",
                 values=(
                     f"#{pay_id}",
@@ -371,6 +384,7 @@ class CustomerPaymentHistoryView(ctk.CTkFrame):
                     company,
                     inv_label,
                     pay_date_str,
+                    f"₱{bal_before:,.2f}" if bal_before is not None else "—",
                     f"₱{float(amount):,.2f}",
                     method.title() if method else "—",
                     f"₱{float(bal_after):,.2f}" if bal_after is not None else "—",
@@ -496,7 +510,7 @@ class CustomerPaymentHistoryView(ctk.CTkFrame):
         if not path:
             return
         try:
-            with open(path, "w", newline="", encoding="utf-8") as f:
+            with open(path, "w", newline="", encoding="utf-8-sig") as f:
                 writer = csv.writer(f)
                 writer.writerow(headers)
                 for iid in self._tree.get_children():
