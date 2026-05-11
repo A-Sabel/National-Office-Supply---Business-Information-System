@@ -119,16 +119,16 @@ Tasks mapped to: Req 2, 3, 11, 13, 15; Technical items 10, 11
   - [x] "New Order" form: Customer lookup, part multi-select, qty input, dynamic line item UI
   - [x] Over-selling guard: Check `part.stock_count >= line_qty` before allowing confirm (Manager override option)
   - [x] Line item management: Add/remove rows, recalculate invoice total on the fly
-  - [ ] Submit order: Call `InvoiceService.create()` → stores invoice + line items → sets status='pending'
+  - [x] Submit order: Call `InvoiceService.create()` → stores invoice + line items → sets status='pending'
   - [x] Invoice list: Display pending/shipped invoices; filter by status
-  - [ ] Shipment button: Click → `InvoiceService.update_status('shipped')` → triggers `PartService.update_stock()` for each line
+  - [x] Shipment button: Click → `InvoiceService.update_status('shipped')` → triggers `PartService.update_stock()` for each line
   - [x] Cancellation: Only allow if status != 'shipped'; sets status='void', removes line items
 - [ ] Backend order validation:
-  - [ ] Quantity must be >= 1
-  - [ ] Customer must exist and `is_active = TRUE`
-  - [ ] Part must exist and have stock (or Manager override)
-  - [ ] Invoice total calculated correctly: `SUM(qty * selling_price)` per line
-- [ ] Implement invoice-to-shipment chain: When marked shipped, decrement parts and update customer balance (Req 13)
+  - [x] Quantity must be >= 1
+  - [x] Customer must exist and `is_active = TRUE`
+  - [x] Part must exist and have stock (or Manager override)
+  - [x] Invoice total calculated correctly: `SUM(qty * selling_price)` per line
+- [x] Implement invoice-to-shipment chain: When marked shipped, decrement parts and update customer balance (Req 13)
 - [ ] **Deliverable:** Full order-to-shipment flow; parts decrement on ship; customer balance updates; no overselling without Manager override
 
 #### 2B. Payroll & Timecard Workflows (Week 3, Days 3–5 + Week 4, Day 1) — **PRIORITY: CRITICAL**
