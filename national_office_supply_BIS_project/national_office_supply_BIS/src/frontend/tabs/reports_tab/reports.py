@@ -132,11 +132,6 @@ class ReportsHubView(ctk.CTkFrame):
         # Create or show the requested section
         if section_key not in self._section_frames:
             self._section_frames[section_key] = self._create_section_view(section_key)
-        else:
-            # View already exists — refresh its data so new DB records appear
-            view = self._section_frames[section_key]
-            if hasattr(view, "refresh_data"):
-                view.refresh_data()
 
         self._section_frames[section_key].grid(row=0, column=0, sticky="nsew")
         self._active_key = section_key

@@ -108,10 +108,9 @@ class CustomerSearchBar(ctk.CTkFrame):
                 width=34,
                 height=34,
                 command=on_refresh,
-                fg_color="#e8eef5",
-                hover_color="#d7e3f0",
-                text_color="#2c3e50",
-                font=("Segoe UI", 16, "bold"),
+                fg_color="#ebf3fb",
+                hover_color="#dbe9f9",
+                text_color="#1f5f9f",
             )
             self.refresh_btn.pack(side="left", padx=(0, 6))
 
