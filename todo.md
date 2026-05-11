@@ -8,19 +8,21 @@ Use this file as your live implementation checklist.
 - [ ] Phase 2: Core Workflows and UI Integration complete
 - [ ] Phase 3: Validation, Hardening, and Delivery complete
 
-Completed Requirements: `10 / 17`  
-Last Updated: `2026-05-09`
+Completed Requirements: `12 / 17`  
+Last Updated: `2026-05-10`
 
 Current Code Snapshot:
 
-- Reports are now routed through `ReportsHubView` under `frontend/tabs/reports_tab/`.
-- Implemented reports: Inventory Report, Weekly Sales Report, Stock Ordering Report.
-- Weekly Sales also covers rep commissions and high-performance rep summaries.
-- `navigation_bar.py` already hides Manager-only tabs for non-manager roles.
+- `login.py` now validates credentials against PostgreSQL, populates the active session, and supports password visibility plus Enter-to-login.
+- `navigation_bar.py` hides tabs based on the active role.
+- `dashboard.py` is role-aware for Manager, Sales Rep, and Hourly users, with Decimal-safe KPI calculations and a compact Sales Rep goal progress card.
+- `orders_and_invoices.py` now provides an order/invoice workflow with overselling guards and cancellation handling.
+- `payroll.py` is role-based and connected to the database for Manager, Sales Rep, and Hourly views.
 - `CustomersView` already supports live balance display, search/filtering, payments, and customer edits.
+- `ReportsHubView` routes to live report tabs; implemented reports include Inventory Report, Weekly Sales Report, and Stock Ordering Report.
 - PostgreSQL schema migration has already been executed; the database tables are created.
-- Placeholder reports (still pending): Customer List & Balances, Customer Payment History.
-- `orders_and_invoices.py` is implemented with OrdersView, CreateInvoicePanel, and over-selling guards.
+- Placeholder reports still pending: Customer List & Balances, Customer Payment History.
+- Remaining gaps are mostly service-layer consolidation, session timeout/session manager work, audit logging, and a few report/workflow finish items.
 
 QD Section Prep:
 
@@ -62,12 +64,12 @@ Tasks mapped to: Req 1, 2, 3, 10, 14, 16, 17
 Tasks mapped to: All technical implementation items 1–15
 
 - [x] Update `backend/database.py`: Centralized DB connection management (psycopg2 pool or single connection wrapper)
-- [ ] Implement `CustomerService`: `get_all()`, `get_by_id()`, `create()`, `update()`, `update_balance()`, `delete()` (soft delete with `is_active = FALSE`)
+- [x] Implement `CustomerService`: `get_all()`, `get_by_id()`, `create()`, `update()`, `update_balance()`, `delete()` (soft delete with `is_active = FALSE`)
 - [ ] Implement `PartService`: `get_all()`, `get_by_id()`, `create()`, `update()`, `get_low_stock()`, `update_stock()`, `get_supplier_cost()`
 - [ ] Implement `EmployeeService`: `get_all()`, `get_by_id()`, `get_hourly_staff()`, `get_active_staff()`
 - [ ] Implement `InvoiceService`: `create()`, `add_line_item()`, `get_invoice_total()`, `update_status()`, `get_customer_invoices()`
 - [ ] Implement `TimecardService`: `create_weekly_timecards()`, `get_missing_timecards()`, `mark_complete()`, `check_if_week_exists()`
-- [ ] Implement `PaymentService`: `record_payment()`, `get_customer_payments()`, `mark_invoice_paid()`, `update_balance()`
+- [x] Implement `PaymentService`: `record_payment()`, `get_customer_payments()`, `mark_invoice_paid()`, `update_balance()`
 - [ ] Implement `ReportService`: Base class for report queries with reusable filter/sort/export logic
 - [ ] Implement `SupplierCostService`: `get_lowest_cost_supplier()`, `get_all_costs_for_part()` (maps to Req 14)
 - [ ] **Deliverable:** Service layer with tested basic CRUD and query operations; all tab views can delegate to services
@@ -89,10 +91,17 @@ Tasks mapped to: FS-Sec1, FS-Sec2, FS-Sec3, Req 16
 
 Tasks mapped to: All existing views (customers, inventory, reports)
 
+<<<<<<< HEAD
+- [x] Update `CustomersView`: Wire balance display to `CustomerService.get_by_id()` (live DB pull)
+- [x] Update `CustomersView`: Wire payment processing to `PaymentService.record_payment()` and balance update
+- [x] Update `InventoryView`: Wire data loaders to `PartService` and `SupplierCostService`
+- [x] Update `ReportsHubView`: Wire all report endpoints to `ReportService` base methods
+=======
 - [ ] Update `CustomersView`: Wire balance display to `CustomerService.get_by_id()` (live DB pull)
 - [ ] Update `CustomersView`: Wire payment processing to `PaymentService.record_payment()` and balance update
-- [ ] Update `InventoryView`: Wire data loaders to `PartService` and `SupplierCostService`
+- [] Update `InventoryView`: Wire data loaders to `PartService` and `SupplierCostService`
 - [ ] Update `ReportsHubView`: Wire all report endpoints to `ReportService` base methods
+>>>>>>> 1efc4b5 (Checked the to do and modify the inventory)
 - [ ] Run integration test: Create order → check invoice total → check invoice in DB
 - [ ] Run integration test: Record payment → check customer balance updated → check Payments table
 - [ ] Run integration test: Load inventory → verify stock counts match DB
@@ -136,39 +145,43 @@ Tasks mapped to: Req 2, 3, 11, 13, 15; Technical items 10, 11
 Tasks mapped to: Req 6, 7, 8, 9, 12; Technical items 1, 2, 8, 9, 12
 
 - [ ] Implement weekly timecard auto-generation:
-  - [ ] On app startup: `TimecardService.check_if_week_exists(this_week_date)`
-  - [ ] If missing AND not Sales Rep AND `is_active = TRUE`: Auto-create blank timecards for all hourly staff
-  - [ ] Prevent duplicates: Validate no existing record before insert
+  - [x] On app startup: `TimecardService.check_if_week_exists(this_week_date)`
+  - [x] If missing AND not Sales Rep AND `is_active = TRUE`: Auto-create blank timecards for all hourly staff
+  - [x] Prevent duplicates: Validate no existing record before insert
   - [ ] Test: Restart app mid-week → verify no duplicate timecards created
-- [ ] Implement `PayrollView` in `payroll.py`:
-  - [ ] "Missing Timecards" panel: Show hourly staff missing entries for current week (using `LEFT JOIN` logic)
-  - [ ] "Payroll Issuance" section:
-    - [ ] Button to generate weekly payroll (Monday via manual trigger in demo)
-    - [ ] For each hourly employee with complete timecard: `gross = hours_worked * hourly_wage`
-    - [ ] For each Rep this week: `commission = total_invoices_rep_wrote * 0.05` (5%)
-    - [ ] Export payroll to CSV: `employee_number | name | gross | commission | net`
-  - [ ] Button to "Issue Check": Records `Payment` for each employee, updates YTD sales
-  - [ ] Payroll history: List of past payroll runs (date, num checks issued)
+
+- [x] Implement `PayrollView` in `payroll.py`:
+  - [x] "Missing Timecards" panel: Show hourly staff missing entries for current week (using `LEFT JOIN` logic)
+  - [x] "Payroll Issuance" section:
+    - [x] Button to generate weekly payroll (Monday via manual trigger in demo)
+    - [x] For each hourly employee with complete timecard: `gross = hours_worked * hourly_wage`
+    - [x] For each Rep this week: `commission = total_invoices_rep_wrote * 0.05` (5%)
+    - [x] Export payroll to CSV: `employee_number | name | gross | commission | net`
+  - [x] Button to "Issue Check": Records `Payment` for each employee, updates YTD sales
+  - [x] Payroll history: List of past payroll runs (date, num checks issued)
+
 - [ ] Implement sales rep commission tracking:
-  - [ ] Identify invoices written by rep this week (filter by `invoices.rep_id`)
-  - [ ] Sum invoice totals, multiply by 0.05 → commission amount
+  - [x] Identify invoices written by rep this week (filter by `invoices.rep_id`)
+  - [x] Sum invoice totals, multiply by 0.05 → commission amount
   - [ ] Show in payroll export and Reports tab
-- [ ] Implement YTD sales update:
-  - [ ] Query `SUM(invoices.total_amount)` per rep since year start
-  - [ ] Store in employee record (or ephemeral in report)
-  - [ ] Display in Rep Performance report
+
+- [x] Implement YTD sales update:
+  - [x] Query `SUM(invoices.total_amount)` per rep since year start
+  - [x] Store in employee record (or ephemeral in report)
+  - [x] Display in Rep Performance report
+
 - [ ] **Deliverable:** Timecards auto-generate weekly. Payroll form calculates gross (hourly) + commission (5% reps) + YTD. Checks issued and exported.
 
 #### 2C. Advanced Reporting & Analytics (Week 4, Days 2–4) — **PRIORITY: HIGH**
 
 Tasks mapped to: Req 4, 9; Technical items 3, 4, 7, 9, 12, 13
 
-- [ ] Complete "Customer List & Balances" report:
+- [x] Complete "Customer List & Balances" report:
   - [ ] Query: `SELECT customer_id, company_name, balance, is_active FROM Customers`
   - [ ] Dynamic search/filter by company name or customer number
   - [ ] Show: Customer #, Company, Address, Current Balance, Status (Active/Closed)
   - [ ] Export to CSV with same columns
-- [ ] Complete "Customer Payment History" report:
+- [x] Complete "Customer Payment History" report:
   - [ ] Query: `SELECT customer_id, payment_date, amount, payment_method FROM Payments ORDER BY payment_date DESC`
   - [ ] Optional filter by date range or customer
   - [ ] Display: Customer, Date, Amount, Method, Running Balance
@@ -198,18 +211,18 @@ Tasks mapped to: Req 5, 13; Technical items 5, 6, 14
   - [x] Display as critical alerts in top bar alert dropdown
   - [x] Show: Part #, Current Stock, Linked Unshipped Orders count
 - [ ] Implement inventory bottleneck detection (Technical item 5):
-  - [ ] Join `Invoice_Lines`, `Invoices`, `Parts`
-  - [ ] Filter: `Invoices.status = 'pending' AND Parts.stock_count <= 1`
+  - [x] Join `Invoice_Lines`, `Invoices`, `Parts`
+  - [x] Filter: `Invoices.status = 'pending' AND Parts.stock_count <= 1`
   - [ ] Show in alerts: "Order #X blocked: Part Y (stock: 0) needed"
 - [ ] Dynamic restocking strategy (Technical item 14):
-  - [ ] Find top 2 parts by YTD sales volume
-  - [ ] Double their `restock_value`
-  - [ ] Verify no unintended parts modified
+  - [x] Find top 2 parts by YTD sales volume
+  - [x] Double their `restock_value`
+  - [x] Verify no unintended parts modified
 - [ ] Price inflation logic (Technical item 15):
-  - [ ] Parts with 0 YTD sales:
-    - [ ] If `restock_value < 4`: price \*= 1.10
-    - [ ] If `restock_value >= 4`: price \*= 1.20
-  - [ ] Run logic on-demand (admin button or scheduled)
+  - [x] Parts with 0 YTD sales:
+    - [x] If `restock_value < 4`: price \*= 1.10
+    - [x] If `restock_value >= 4`: price \*= 1.20
+  - [x] Run logic on-demand (admin button or scheduled)
 - [ ] **Deliverable:** Critical alerts working, bottlenecks shown, dynamic restocking and pricing applied
 
 #### Phase 2 Summary
@@ -614,7 +627,6 @@ Phase 3 requires Phase 2 fully complete; focuses on validation and polish.
 ---
 
 ## Functional Specification Plan (FS-Sec)
-
 ### FS-Sec1: Security and Access Control
 
 - [x] Create login view module for credential validation against `Employees`
@@ -627,7 +639,7 @@ Phase 3 requires Phase 2 fully complete; focuses on validation and polish.
 ### FS-Sec2: Automated Identifiers
 
 - [ ] Ensure primary keys use auto-increment strategy (`SERIAL`/`BIGSERIAL`)
-- [ ] Remove manual ID entry from create forms
+- [x] Remove manual ID entry from create forms
 - [ ] Validate generated IDs are unique and sequential
 - [ ] Keep `part_number` as a flexible business SKU field
 
@@ -654,7 +666,7 @@ Phase 3 requires Phase 2 fully complete; focuses on validation and polish.
 - [x] Create Weekly Sales report (last 7 days invoice total)
 - [x] Create Sales Rep Payroll report (commission calculation: `Sales * 0.05`)
 - [x] Create Stock Ordering report (`stock <= trigger`)
-- [ ] Create searchable Customer List report (profiles and balances)
+- [x] Create searchable Customer List report (profiles and balances)
 - [ ] Add export option for each report (CSV/JSON)
 
 ### Controller Layer (Architectural Impact)
@@ -732,7 +744,7 @@ Sales, Invoicing & Account Balances
 - [ ] Cancellation: Cancelling sets invoice `status = 'void'` and removes invoice_lines; prohibit cancellation if `status = 'shipped'`
 - [ ] Payments & Partial Payments: Track in `customer_payments`; invoice becomes `is_paid` when cumulative payments >= `total_amount`; otherwise adjust customer's `current_balance`
 - [ ] Customer Balance Updates: Increase `current_balance` when invoice is shipped; decrease when payments logged
-- [ ] Customer Deletion Rule: Do not allow deletion if customer has invoices; set `is_active = FALSE` to close account
+- [x] Customer Deletion Rule: Do not allow deletion if customer has invoices; set `is_active = FALSE` to close account
 
 System, Security & Reporting Rules
 

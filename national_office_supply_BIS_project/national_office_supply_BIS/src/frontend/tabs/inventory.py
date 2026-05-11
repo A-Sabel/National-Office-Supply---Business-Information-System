@@ -124,33 +124,72 @@ class InventoryView(ctk.CTkFrame):
 
         self._build_place_order_card()
         self._build_receive_restock_card()
+        self._build_bottleneck_card()
+        self._build_admin_actions_card()
 
     def _load_parts_data(self):
-        """Loads data from the DB via QueryManager. Falls back to mock data if not connected."""
-        if hasattr(self.controller, 'query_manager'):
-            try:
-                # To be integrated with QD-Sec3 logic or general catalog query
-                # result = self.controller.query_manager.run_query("CATALOG_ALL")
-                # self._parts_rows = [tuple(row.values()) for row in result.rows]
-                pass
-            except Exception as e:
-                print(f"DB Error: {e}")
-        
-        # Mock Data Fallback
-        if not self._parts_rows:
-            seeds = [
-                ("BIC Pens Blue (12pk)", "Pens", 120, 20, "₱150.00", "Pack"),
-                ("HP LaserJet Toner Black", "Toners", 485, 50, "₱4500.00", "Unit"),
-                ("Paper Mate Eraser Pink (Lg)", "Pens", 75, 50, "₱25.00", "Unit"),
-                ("Bond Paper A4", "Paper", 0, 50, "₱250.00", "Ream"),
-            ]
-            rows = []
-            for idx in range(102):
-                desc, cat, stock, low, price, unit = seeds[idx % len(seeds)]
-                sku = str(10000 + idx)
-                rows.append((sku, desc, cat, stock, low, price, unit, "✏️ Edit"))
-            self._parts_rows = rows
+        import psycopg2
+        import psycopg2.extras
 
+        try:
+            conn = psycopg2.connect(**self.db_config)
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute("""
+                SELECT
+                    p.part_number,
+                    p.description,
+                    p.selling_price,
+                    p.stock_count,
+                    p.trigger_amount,
+                    p.on_order,
+                    s.company_name AS best_supplier_name
+                FROM parts p
+                LEFT JOIN LATERAL (
+                    SELECT ip.supplier_id
+                    FROM item_parts ip
+                    WHERE ip.part_number = p.part_number
+                    ORDER BY ip.cost ASC
+                    LIMIT 1
+                ) bs ON TRUE
+                LEFT JOIN suppliers s ON s.supplier_id = bs.supplier_id
+                ORDER BY p.part_number
+            """)
+            rows = cur.fetchall()
+            cur.close()
+            conn.close()
+
+            self._parts_rows = []
+            for r in rows:
+                self._parts_rows.append((
+                    str(r["part_number"]),
+                    r["description"],
+                    "General",  # no category in schema
+                    r["stock_count"],
+                    r["trigger_amount"],
+                    f"₱{float(r['selling_price']):,.2f}",
+                    r["best_supplier_name"] or "—",
+                    "✏️ Edit",
+                ))
+
+        except Exception as e:
+            print(f"[DB ERROR] _load_parts_data: {e}")
+            self._parts_rows = [] 
+
+    def _fetch_suppliers(self):
+        """Returns list of supplier names from DB for dropdowns."""
+        import psycopg2
+        try:
+            conn = psycopg2.connect(**self.db_config)
+            cur = conn.cursor()
+            cur.execute("SELECT company_name FROM suppliers ORDER BY company_name")
+            names = [row[0] for row in cur.fetchall()]
+            cur.close()
+            conn.close()
+            return names if names else ["No suppliers found"]
+        except Exception as e:
+            print(f"[DB ERROR] _fetch_suppliers: {e}")
+            return ["DB unavailable"]
+        
     # ════════════════════════════════════════════════════════════════════
     # LEFT PANEL: Catalog header + search + table
     # ════════════════════════════════════════════════════════════════════
@@ -191,10 +230,14 @@ class InventoryView(ctk.CTkFrame):
         right_tools = ctk.CTkFrame(inner, fg_color="transparent")
         right_tools.pack(side="right")
 
-        ctk.CTkLabel(left_tools, text="🔍", font=("Segoe UI", 14)).pack(side="left", padx=(0, 8))
-        ctk.CTkEntry(left_tools, placeholder_text="Search…", width=240, height=34, corner_radius=6, fg_color="#f5f7fa", text_color=TEXT_DARK, border_color=BORDER, font=FONT_BODY).pack(side="left", padx=(0, 20))
+        self._search_var = tk.StringVar()
+        self._search_var.trace_add("write", lambda *_: self._apply_search_filter())
+        ctk.CTkEntry(left_tools, textvariable=self._search_var, placeholder_text="Search…", width=240, height=34, corner_radius=6, fg_color="#f5f7fa", text_color=TEXT_DARK, border_color=BORDER, font=FONT_BODY).pack(side="left", padx=(0, 20))
+
         ctk.CTkLabel(left_tools, text="Filter:", font=FONT_BODY, text_color=TEXT_MUTED).pack(side="left", padx=(0, 8))
-        ctk.CTkOptionMenu(left_tools, values=["All", "In Stock", "Low Stock", "Out of Stock"], width=130, height=34, corner_radius=6, fg_color="#f5f7fa", button_color=BRAND_BLUE, text_color=TEXT_DARK, font=FONT_BODY).pack(side="left")
+        self._filter_var = tk.StringVar(value="All")
+        self._filter_var.trace_add("write", lambda *_: self._apply_search_filter())
+        ctk.CTkOptionMenu(left_tools, variable=self._filter_var, values=["All", "In Stock", "Low Stock", "Out of Stock"], width=130, height=34, corner_radius=6, fg_color="#f5f7fa", button_color=BRAND_BLUE, text_color=TEXT_DARK, font=FONT_BODY).pack(side="left")
 
         self.prev_page_btn = ctk.CTkButton(right_tools, text="‹", width=30, height=28, corner_radius=6, fg_color="#f3f5f8", hover_color="#e8ecf2", text_color="#9ca3af", font=("Segoe UI", 13, "bold"), command=self._go_prev_page)
         self.prev_page_btn.pack(side="left", padx=(0, 6))
@@ -233,7 +276,7 @@ class InventoryView(ctk.CTkFrame):
         cols = ("SKU", "Part Description", "Category", "Stock Count", "Low Stock Threshold", "Selling Price", "Unit", "Actions")
         widths = (80, 220, 100, 80, 130, 120, 60, 80)
 
-        tree = ttk.Treeview(container, columns=cols, show="headings", style="Parts.Treeview", yscrollcommand=vsb.set, xscrollcommand=hsb.set, height=10)
+        tree = ttk.Treeview(container, columns=cols, show="headings", style="Parts.Treeview", yscrollcommand=vsb.set, xscrollcommand=hsb.set)
         vsb.configure(command=tree.yview)
         hsb.configure(command=tree.xview)
 
@@ -242,6 +285,8 @@ class InventoryView(ctk.CTkFrame):
             tree.heading(col, text=col)
 
         self._parts_tree = tree
+        self._tbl_container = container
+        container.bind("<Configure>", self._on_table_resize)
         self._current_page = 1
 
         tree.grid(row=0, column=0, sticky="nsew")
@@ -249,6 +294,23 @@ class InventoryView(ctk.CTkFrame):
         hsb.grid(row=1, column=0, sticky="ew")
 
         self._refresh_parts_table_page()
+
+    def _on_table_resize(self, event=None):
+        """Recalculate page size based on available table height and re-render."""
+        if self._parts_tree is None:
+            return
+
+        row_height = 36  # Must match rowheight in Parts.Treeview style
+        header_height = 28  # Approximate heading row height
+        available_height = event.height if event else self._tbl_container.winfo_height()
+        usable = available_height - header_height
+
+        new_page_size = max(1, usable // row_height)
+
+        if new_page_size != self._page_size:
+            self._page_size = new_page_size
+            self._current_page = 1
+            self._refresh_parts_table_page()
 
     # ════════════════════════════════════════════════════════════════════
     # RIGHT PANEL: Place Restock Order + Receive Restock
@@ -264,7 +326,15 @@ class InventoryView(ctk.CTkFrame):
         badge = ctk.CTkLabel(card, text="✓ Auto-Suggested: Lowest Cost Supplier", fg_color="#e8f5e9", text_color="#2e7d32", font=("Segoe UI", 9, "bold"), corner_radius=4)
         badge.pack(fill="x", padx=10, pady=(6, 6))
 
-        self._create_form_field(card, "Part Name/SKU", is_combo=True)
+        frame = ctk.CTkFrame(card, fg_color="transparent")
+        frame.pack(fill="x", padx=10, pady=(0, 5))
+        ctk.CTkLabel(frame, text="Part Name/SKU", font=FONT_SMALL, text_color=TEXT_MUTED).pack(anchor="w", pady=(0, 3))
+        self.po_part_combo = ctk.CTkComboBox(
+            frame,
+            values=[r[1] for r in self._parts_rows],
+            height=28, fg_color="#f5f7fa", border_color=BORDER
+        )
+        self.po_part_combo.pack(fill="x")
 
         qty_supplier = ctk.CTkFrame(card, fg_color="transparent")
         qty_supplier.pack(fill="x", padx=10, pady=(2, 3))
@@ -274,12 +344,15 @@ class InventoryView(ctk.CTkFrame):
         qty_frame = ctk.CTkFrame(qty_supplier, fg_color="transparent")
         qty_frame.grid(row=0, column=0, sticky="ew", padx=(0, 6))
         ctk.CTkLabel(qty_frame, text="Quantity", font=FONT_SMALL, text_color=TEXT_MUTED).pack(anchor="w")
-        ctk.CTkEntry(qty_frame, height=28, fg_color="#f5f7fa", placeholder_text="500").pack(fill="x", pady=(2, 0))
+        self.po_qty_entry = ctk.CTkEntry(qty_frame, height=28, fg_color="#f5f7fa", placeholder_text="500")
+        self.po_qty_entry.pack(fill="x", pady=(2, 0))
 
         supp_frame = ctk.CTkFrame(qty_supplier, fg_color="transparent")
         supp_frame.grid(row=0, column=1, sticky="ew", padx=(6, 0))
         ctk.CTkLabel(supp_frame, text="Supplier", font=FONT_SMALL, text_color=TEXT_MUTED).pack(anchor="w")
-        ctk.CTkComboBox(supp_frame, values=["Apex Office Solutions", "Office Mart"], height=28, fg_color="#f5f7fa").pack(fill="x", pady=(2, 0))
+        supplier_names = self._fetch_suppliers()
+        self.supplier_combo = ctk.CTkComboBox(supp_frame, values=supplier_names, height=28, fg_color="#f5f7fa")
+        self.supplier_combo.pack(fill="x", pady=(2, 0))
 
         price_info = ctk.CTkFrame(card, fg_color="#f5f7fa", corner_radius=6)
         price_info.pack(fill="x", padx=10, pady=(6, 6))
@@ -308,8 +381,11 @@ class InventoryView(ctk.CTkFrame):
         search_row = ctk.CTkFrame(card, fg_color="#f5f7fa", corner_radius=6)
         search_row.pack(fill="x", padx=10, pady=(0, 6))
         search_row.grid_columnconfigure(0, weight=1)
-        ctk.CTkEntry(search_row, placeholder_text="PO Number", height=28, fg_color="#f5f7fa", border_color=BORDER).grid(row=0, column=0, sticky="ew", padx=(0, 2), pady=4)
-        ctk.CTkLabel(search_row, text="🔍", font=("Segoe UI", 12), text_color=TEXT_MUTED, width=24).grid(row=0, column=1, padx=(0, 6))
+        self.recv_po_entry = ctk.CTkEntry(
+        search_row, placeholder_text="PO Number",
+        height=28, fg_color="#f5f7fa", border_color=BORDER
+        )
+        self.recv_po_entry.grid(row=0, column=0, sticky="ew", padx=(0, 2), pady=4)
 
         info_bg = ctk.CTkFrame(card, fg_color="#f8f9fa", corner_radius=6)
         info_bg.pack(fill="x", padx=10, pady=(0, 6))
@@ -337,6 +413,186 @@ class InventoryView(ctk.CTkFrame):
         if self.role != "Manager":
             self.mark_rcvd_btn.configure(state="disabled", fg_color="#bdc3c7", text_color="#7f8c8d")
 
+    def _build_bottleneck_card(self):
+        card = self._create_card_container(self.right_panel)
+        card.pack(fill="x", pady=(0, 8))
+
+        hdr = ctk.CTkFrame(card, fg_color="transparent")
+        hdr.pack(fill="x", padx=10, pady=(8, 4))
+        ctk.CTkLabel(hdr, text="⚠ Order Bottlenecks", font=FONT_SECTION, text_color=ACCENT_RED).pack(side="left")
+        ctk.CTkButton(
+            hdr, text="↻", width=28, height=28, corner_radius=6,
+            fg_color="#f5f7fa", hover_color="#e8ecf2", text_color=TEXT_DARK,
+            command=self._refresh_bottlenecks
+        ).pack(side="right")
+
+        self._bottleneck_frame = ctk.CTkFrame(card, fg_color="transparent")
+        self._bottleneck_frame.pack(fill="x", padx=10, pady=(0, 8))
+        self._refresh_bottlenecks()
+
+    def _refresh_bottlenecks(self):
+        import psycopg2
+        import psycopg2.extras
+
+        for w in self._bottleneck_frame.winfo_children():
+            w.destroy()
+
+        try:
+            conn = psycopg2.connect(**self.db_config)
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute("""
+                SELECT
+                    p.part_number,
+                    p.description,
+                    p.stock_count,
+                    COUNT(DISTINCT i.invoice_id) AS blocked_order_count
+                FROM parts p
+                JOIN invoice_lines il ON il.part_number = p.part_number
+                JOIN invoices i ON i.invoice_id = il.invoice_id
+                WHERE i.status = 'pending'
+                AND p.stock_count <= 1
+                AND p.on_order = FALSE
+                GROUP BY p.part_number, p.description, p.stock_count
+                ORDER BY p.stock_count ASC
+            """)
+            bottlenecks = cur.fetchall()
+            cur.close()
+            conn.close()
+        except Exception as e:
+            ctk.CTkLabel(self._bottleneck_frame, text=f"DB Error: {e}", text_color=ACCENT_RED, font=FONT_SMALL).pack()
+            return
+
+        if not bottlenecks:
+            ctk.CTkLabel(self._bottleneck_frame, text="✓ No bottlenecks detected", font=FONT_SMALL, text_color=ACCENT_GREEN).pack(anchor="w")
+            return
+
+        for b in bottlenecks:
+            row = ctk.CTkFrame(self._bottleneck_frame, fg_color="#fff5f5", corner_radius=6)
+            row.pack(fill="x", pady=(0, 4))
+            ctk.CTkLabel(row, text=f"Part {b['part_number']} — {b['description'][:28]}", font=("Segoe UI", 10, "bold"), text_color=ACCENT_RED).pack(anchor="w", padx=8, pady=(4, 0))
+            ctk.CTkLabel(row, text=f"Stock: {b['stock_count']}  |  Blocking {b['blocked_order_count']} order(s)", font=FONT_SMALL, text_color=TEXT_MUTED).pack(anchor="w", padx=8, pady=(0, 4))
+
+    def _build_admin_actions_card(self):
+        card = self._create_card_container(self.right_panel)
+        card.pack(fill="x", pady=(0, 8))
+
+        ctk.CTkLabel(card, text="Admin Actions", font=FONT_SECTION, text_color=TEXT_DARK).pack(anchor="w", padx=10, pady=(8, 6))
+
+        self.restock_btn = ctk.CTkButton(
+            card, text="⟳ Apply Dynamic Restock", height=32, corner_radius=6,
+            fg_color=ACCENT_AMBER, hover_color="#d68910", text_color="#ffffff",
+            font=("Segoe UI", 11, "bold"), command=self.handle_apply_dynamic_restock
+        )
+        self.restock_btn.pack(fill="x", padx=10, pady=(0, 6))
+
+        self.inflate_btn = ctk.CTkButton(
+            card, text="↑ Apply Price Inflation", height=32, corner_radius=6,
+            fg_color=ACCENT_RED, hover_color="#c0392b", text_color="#ffffff",
+            font=("Segoe UI", 11, "bold"), command=self.handle_apply_price_inflation
+        )
+        self.inflate_btn.pack(fill="x", padx=10, pady=(0, 8))
+
+        if self.role != "Manager":
+            for btn in (self.restock_btn, self.inflate_btn):
+                btn.configure(state="disabled", fg_color="#bdc3c7", text_color="#7f8c8d")
+
+    def handle_apply_dynamic_restock(self):
+        import psycopg2
+
+        try:
+            conn = psycopg2.connect(**self.db_config)
+            cur = conn.cursor()
+
+            # Find top 2 parts by total quantity sold YTD
+            cur.execute("""
+                SELECT il.part_number, SUM(il.quantity_ordered) AS ytd_qty
+                FROM invoice_lines il
+                JOIN invoices i ON i.invoice_id = il.invoice_id
+                WHERE EXTRACT(YEAR FROM i.invoice_date) = EXTRACT(YEAR FROM CURRENT_DATE)
+                AND i.status != 'void'
+                GROUP BY il.part_number
+                ORDER BY ytd_qty DESC
+                LIMIT 2
+            """)
+            top_parts = [row[0] for row in cur.fetchall()]
+
+            if not top_parts:
+                messagebox.showinfo("Dynamic Restock", "No YTD sales data found. Nothing updated.")
+                conn.close()
+                return
+
+            cur.execute("""
+                UPDATE parts
+                SET restock_value = restock_value * 2
+                WHERE part_number = ANY(%s)
+            """, (top_parts,))
+
+            conn.commit()
+            cur.close()
+            conn.close()
+
+            messagebox.showinfo("Dynamic Restock", f"Restock value doubled for {len(top_parts)} part(s):\n" + "\n".join(str(p) for p in top_parts))
+            self._load_parts_data()
+            self._refresh_parts_table_page()
+
+        except Exception as e:
+            messagebox.showerror("DB Error", f"Failed to apply dynamic restock:\n{e}")
+
+    def handle_apply_price_inflation(self):
+        import psycopg2
+
+        confirm = messagebox.askyesno(
+            "Confirm Price Inflation",
+            "Increase prices for all parts with no YTD sales?\n\n"
+            "• restock_value < 4  →  +10%\n"
+            "• restock_value ≥ 4  →  +20%\n\nContinue?"
+        )
+        if not confirm:
+            return
+
+        try:
+            conn = psycopg2.connect(**self.db_config)
+            cur = conn.cursor()
+
+            # Fetch parts with zero YTD sales
+            cur.execute("""
+                SELECT p.part_number, p.restock_value
+                FROM parts p
+                WHERE p.part_number NOT IN (
+                    SELECT DISTINCT il.part_number
+                    FROM invoice_lines il
+                    JOIN invoices i ON i.invoice_id = il.invoice_id
+                    WHERE EXTRACT(YEAR FROM i.invoice_date) = EXTRACT(YEAR FROM CURRENT_DATE)
+                    AND i.status != 'void'
+                )
+            """)
+            zero_parts = cur.fetchall()
+
+            if not zero_parts:
+                messagebox.showinfo("Price Inflation", "All parts have YTD sales. Nothing updated.")
+                conn.close()
+                return
+
+            updated = 0
+            for part_number, restock_value in zero_parts:
+                multiplier = 1.10 if float(restock_value) < 4 else 1.20
+                cur.execute(
+                    "UPDATE parts SET selling_price = selling_price * %s WHERE part_number = %s",
+                    (multiplier, part_number)
+                )
+                updated += 1
+
+            conn.commit()
+            cur.close()
+            conn.close()
+
+            messagebox.showinfo("Price Inflation", f"Updated prices for {updated} part(s).")
+            self._load_parts_data()
+            self._refresh_parts_table_page()
+
+        except Exception as e:
+            messagebox.showerror("DB Error", f"Failed to apply price inflation:\n{e}")
+
     # ════════════════════════════════════════════════════════════════════
     # Helpers
     # ════════════════════════════════════════════════════════════════════
@@ -359,12 +615,42 @@ class InventoryView(ctk.CTkFrame):
             else:
                 self.toggle_btn.configure(text="▶", fg_color="#27ae60")
 
+    def _apply_search_filter(self):
+        query = self._search_var.get().lower()
+        status_filter = self._filter_var.get()
+
+        result = []
+        for r in self._parts_rows:
+            # r = (sku, desc, cat, stock, threshold, price, supplier, action)
+            sku, desc, _, stock, threshold, *_ = r
+
+            # Search match
+            if query and query not in sku.lower() and query not in desc.lower():
+                continue
+
+            # Status filter match
+            if status_filter == "In Stock" and stock <= 0:
+                continue
+            if status_filter == "Low Stock" and not (0 < stock <= threshold):
+                continue
+            if status_filter == "Out of Stock" and stock != 0:
+                continue
+
+            result.append(r)
+
+        self._filtered_rows = result
+        self._current_page = 1
+        self._refresh_parts_table_page()
+
     def _refresh_parts_table_page(self):
         if self._parts_tree is None:
             return
 
+        # Use filtered rows if available, otherwise fall back to all rows
+        rows = getattr(self, "_filtered_rows", self._parts_rows)
+
         self._parts_tree.delete(*self._parts_tree.get_children())
-        total_rows = len(self._parts_rows)
+        total_rows = len(rows)
         total_pages = max(1, (total_rows + self._page_size - 1) // self._page_size)
 
         if self._current_page > total_pages:
@@ -375,7 +661,7 @@ class InventoryView(ctk.CTkFrame):
         start = (self._current_page - 1) * self._page_size
         end = start + self._page_size
 
-        for row in self._parts_rows[start:end]:
+        for row in rows[start:end]:
             self._parts_tree.insert("", "end", values=row)
 
         self._update_pager_state(total_pages)
@@ -400,7 +686,8 @@ class InventoryView(ctk.CTkFrame):
             self._refresh_parts_table_page()
 
     def _go_next_page(self):
-        total_pages = max(1, (len(self._parts_rows) + self._page_size - 1) // self._page_size)
+        rows = getattr(self, "_filtered_rows", self._parts_rows)
+        total_pages = max(1, (len(rows) + self._page_size - 1) // self._page_size)
         if self._current_page < total_pages:
             self._current_page += 1
             self._refresh_parts_table_page()
@@ -437,35 +724,137 @@ class InventoryView(ctk.CTkFrame):
             messagebox.showerror("System Error", f"An unexpected error occurred: {e}")
 
     def handle_submit_po(self):
-        """Action for the 'Submit PO' button."""
-        try:
-            # In a full implementation, you'd fetch the combo box values here
-            # part = self.po_part_combo.get()
-            # qty = self.po_qty_entry.get()
-            
-            # Simulated Backend Call (this would trigger the decorator in query_manager.py)
-            # self.controller.query_manager.create_purchase_order(part, qty, ...)
-            
-            messagebox.showinfo("Success", "Purchase Order submitted successfully.")
-            
-        except PermissionError as e:
-            messagebox.showerror("Security Override", str(e))
-        except Exception as e:
-            messagebox.showerror("System Error", f"An unexpected error occurred: {e}")
+        import psycopg2
+        from tkinter import messagebox
 
-    def handle_mark_received(self):
-        """Action for the 'Mark Received' button."""
+        part_desc = self.po_part_combo.get()
+        qty_str = self.po_qty_entry.get().strip()
+        supplier_name = self.supplier_combo.get()
+
+        if not part_desc or not qty_str:
+            messagebox.showwarning("Validation", "Please select a part and enter a quantity.")
+            return
+
         try:
-            # Simulate fetching the PO number from the entry field
-            # po_number = self.recv_search_entry.get()
-            
-            # Simulated Backend Call
-            # self.controller.query_manager.receive_restock(po_number)
-            
-            messagebox.showinfo("Success", "Stock updated and PO marked as received.")
-            self._refresh_parts_table_page() # Refresh the table to show new stock counts
-            
+            qty = int(qty_str)
+        except ValueError:
+            messagebox.showwarning("Validation", "Quantity must be a whole number.")
+            return
+
+        # Resolve part_number from description
+        part_number = next(
+            (r[0] for r in self._parts_rows if r[1] == part_desc), None
+        )
+        if not part_number:
+            messagebox.showerror("Error", "Could not resolve part number.")
+            return
+
+        try:
+            conn = psycopg2.connect(**self.db_config)
+            cur = conn.cursor()
+
+            # Resolve supplier_id
+            cur.execute(
+                "SELECT supplier_id FROM suppliers WHERE company_name = %s",
+                (supplier_name,)
+            )
+            row = cur.fetchone()
+            if not row:
+                messagebox.showerror("Error", f"Supplier '{supplier_name}' not found.")
+                conn.close()
+                return
+            supplier_id = row[0]
+
+            # Get unit cost from item_parts
+            cur.execute(
+                "SELECT cost FROM item_parts WHERE part_number = %s AND supplier_id = %s",
+                (part_number, supplier_id)
+            )
+            cost_row = cur.fetchone()
+            unit_cost = float(cost_row[0]) if cost_row else 0.0
+
+            # Insert purchase order
+            cur.execute("""
+                INSERT INTO purchase_orders
+                    (part_number, supplier_id, quantity, unit_cost, received)
+                VALUES (%s, %s, %s, %s, FALSE)
+            """, (part_number, supplier_id, qty, unit_cost))
+
+            # Mark part as on_order
+            cur.execute(
+                "UPDATE parts SET on_order = TRUE WHERE part_number = %s",
+                (part_number,)
+            )
+
+            conn.commit()
+            cur.close()
+            conn.close()
+
+            messagebox.showinfo("Success", f"PO submitted: {qty}x {part_desc} from {supplier_name}.")
+            self._load_parts_data()
+            self._refresh_parts_table_page()
+
         except PermissionError as e:
-            messagebox.showerror("Security Override", str(e))
+            messagebox.showerror("Access Denied", str(e))
         except Exception as e:
-            messagebox.showerror("System Error", f"An unexpected error occurred: {e}")
+            messagebox.showerror("DB Error", f"Failed to submit PO:\n{e}")
+            
+    def handle_mark_received(self):
+        import psycopg2
+        from tkinter import messagebox
+
+        po_number = self.recv_po_entry.get().strip()
+        if not po_number:
+            messagebox.showwarning("Validation", "Please enter a PO number.")
+            return
+
+        try:
+            conn = psycopg2.connect(**self.db_config)
+            cur = conn.cursor()
+
+            # Fetch the PO
+            cur.execute("""
+                SELECT po_id, part_number, quantity, received
+                FROM purchase_orders
+                WHERE po_id = %s
+            """, (po_number,))
+            po = cur.fetchone()
+
+            if not po:
+                messagebox.showerror("Not Found", f"No PO found with ID '{po_number}'.")
+                conn.close()
+                return
+
+            po_id, part_number, quantity, already_received = po
+
+            if already_received:
+                messagebox.showwarning("Already Received", "This PO has already been marked as received.")
+                conn.close()
+                return
+
+            # Update stock and mark PO received
+            cur.execute("""
+                UPDATE parts
+                SET stock_count = stock_count + %s,
+                    on_order = FALSE
+                WHERE part_number = %s
+            """, (quantity, part_number))
+
+            cur.execute("""
+                UPDATE purchase_orders
+                SET received = TRUE
+                WHERE po_id = %s
+            """, (po_id,))
+
+            conn.commit()
+            cur.close()
+            conn.close()
+
+            messagebox.showinfo("Success", f"PO {po_number} received. Stock updated.")
+            self._load_parts_data()
+            self._refresh_parts_table_page()
+
+        except PermissionError as e:
+            messagebox.showerror("Access Denied", str(e))
+        except Exception as e:
+            messagebox.showerror("DB Error", f"Failed to mark received:\n{e}")

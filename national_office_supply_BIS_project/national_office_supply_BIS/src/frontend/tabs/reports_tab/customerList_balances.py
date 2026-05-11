@@ -132,10 +132,15 @@ class CustomerListReportView(ctk.CTkFrame):
             conn = psycopg2.connect(**self.db_config)
             with conn.cursor() as cur:
                 cur.execute("""
-                    SELECT cust_no, company, address, phone,
-                           COALESCE(balance, 0) AS balance, status
-                    FROM   customer
-                    ORDER  BY company
+                    SELECT
+                        customer_number,
+                        company_name,
+                        address,
+                        phone_number,
+                        COALESCE(current_balance, 0) AS balance,
+                        CASE WHEN is_active THEN 'Active' ELSE 'Inactive' END AS status
+                    FROM   customers
+                    ORDER  BY company_name
                 """)
                 rows = cur.fetchall()
             conn.close()
@@ -151,10 +156,15 @@ class CustomerListReportView(ctk.CTkFrame):
             conn = psycopg2.connect(**self.db_config)
             with conn.cursor() as cur:
                 cur.execute("""
-                    SELECT invoice_no, cust_no, invoice_date,
-                           total_amount, is_paid, is_shipped
-                    FROM   invoice
-                    ORDER  BY invoice_date DESC
+                    SELECT
+                        invoice_id,
+                        customer_number,
+                        date_written,
+                        COALESCE(total_amount, 0),
+                        CASE WHEN status = 'paid' THEN TRUE ELSE FALSE END,
+                        CASE WHEN status IN ('shipped','paid') THEN TRUE ELSE FALSE END
+                    FROM   invoices
+                    ORDER  BY date_written DESC
                 """)
                 rows = cur.fetchall()
             conn.close()
@@ -368,13 +378,22 @@ class CustomerListReportView(ctk.CTkFrame):
         tree.delete(*tree.get_children())
         for c in data:
             cust_no, company, address, phone, balance, status = c
+            # Format customer number nicely
+            try:
+                cust_label = f"C-{int(cust_no):04d}"
+            except Exception:
+                cust_label = str(cust_no)
+            try:
+                balance = float(balance)
+            except Exception:
+                balance = 0.0
             if balance > 0 and status == "Active":
                 tag = "balance"
             else:
                 tag = {"Active": "active", "Inactive": "inactive", "New": "new"}.get(status, "active")
             tree.insert("", "end",
                 values=(
-                    cust_no, company, address, phone,
+                    cust_label, company, address or "—", phone or "—",
                     f"₱{balance:,.2f}" if balance > 0 else "—",
                     status,
                 ),
@@ -415,7 +434,13 @@ class CustomerListReportView(ctk.CTkFrame):
     def _populate_balances(self):
         tree = self._balances_tree
         tree.delete(*tree.get_children())
-        cust_company = {c[0]: c[1] for c in self.customers}
+        # Key by int (from DB) so lookup works whether sample or live data
+        cust_company = {}
+        for c in self.customers:
+            try:
+                cust_company[int(c[0])] = c[1]
+            except Exception:
+                cust_company[c[0]] = c[1]
 
         for inv in self.invoices:
             inv_no, cust_no, inv_date, amount, is_paid, is_shipped = inv
@@ -438,11 +463,26 @@ class CustomerListReportView(ctk.CTkFrame):
             else:
                 tag = "unpaid"    # not paid but already shipped
 
+            try:
+                cust_label = f"C-{int(cust_no):04d}"
+                cust_key   = int(cust_no)
+            except Exception:
+                cust_label = str(cust_no)
+                cust_key   = cust_no
+            try:
+                inv_label = f"INV-{int(inv_no)}"
+            except Exception:
+                inv_label = str(inv_no)
+            try:
+                amount = float(amount)
+            except Exception:
+                amount = 0.0
+
             tree.insert("", "end",
                 values=(
-                    cust_no,
-                    cust_company.get(cust_no, "—"),
-                    inv_no,
+                    cust_label,
+                    cust_company.get(cust_key, "—"),
+                    inv_label,
                     inv_date_str,
                     f"₱{amount:,.2f}",
                     "✅ Yes" if is_paid    else "❌ No",
@@ -513,11 +553,11 @@ class CustomerListReportView(ctk.CTkFrame):
         filtered = [
             c for c in self.customers
             if (not query or
-                query in c[0].lower() or
-                query in c[1].lower() or
-                query in c[2].lower())
+                query in str(c[0]).lower() or
+                query in str(c[1]).lower() or
+                query in str(c[2]).lower())
             and (status == "All" or c[5] == status)
-            and (not balance_only or c[4] > 0)
+            and (not balance_only or float(c[4] or 0) > 0)
         ]
         self._populate_customers(filtered)
 
@@ -534,7 +574,7 @@ class CustomerListReportView(ctk.CTkFrame):
             return
         headers = ("Cust. No.", "Company", "Address", "Phone", "Current Balance", "Status")
         try:
-            with open(path, "w", newline="", encoding="utf-8") as f:
+            with open(path, "w", newline="", encoding="utf-8-sig") as f:
                 writer = csv.writer(f)
                 writer.writerow(headers)
                 for iid in self._customers_tree.get_children():
