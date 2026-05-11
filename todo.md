@@ -91,10 +91,17 @@ Tasks mapped to: FS-Sec1, FS-Sec2, FS-Sec3, Req 16
 
 Tasks mapped to: All existing views (customers, inventory, reports)
 
+<<<<<<< HEAD
 - [x] Update `CustomersView`: Wire balance display to `CustomerService.get_by_id()` (live DB pull)
 - [x] Update `CustomersView`: Wire payment processing to `PaymentService.record_payment()` and balance update
 - [x] Update `InventoryView`: Wire data loaders to `PartService` and `SupplierCostService`
 - [x] Update `ReportsHubView`: Wire all report endpoints to `ReportService` base methods
+=======
+- [ ] Update `CustomersView`: Wire balance display to `CustomerService.get_by_id()` (live DB pull)
+- [ ] Update `CustomersView`: Wire payment processing to `PaymentService.record_payment()` and balance update
+- [] Update `InventoryView`: Wire data loaders to `PartService` and `SupplierCostService`
+- [ ] Update `ReportsHubView`: Wire all report endpoints to `ReportService` base methods
+>>>>>>> 1efc4b5 (Checked the to do and modify the inventory)
 - [ ] Run integration test: Create order → check invoice total → check invoice in DB
 - [ ] Run integration test: Record payment → check customer balance updated → check Payments table
 - [ ] Run integration test: Load inventory → verify stock counts match DB
@@ -138,27 +145,31 @@ Tasks mapped to: Req 2, 3, 11, 13, 15; Technical items 10, 11
 Tasks mapped to: Req 6, 7, 8, 9, 12; Technical items 1, 2, 8, 9, 12
 
 - [ ] Implement weekly timecard auto-generation:
-  - [ ] On app startup: `TimecardService.check_if_week_exists(this_week_date)`
-  - [ ] If missing AND not Sales Rep AND `is_active = TRUE`: Auto-create blank timecards for all hourly staff
-  - [ ] Prevent duplicates: Validate no existing record before insert
+  - [x] On app startup: `TimecardService.check_if_week_exists(this_week_date)`
+  - [x] If missing AND not Sales Rep AND `is_active = TRUE`: Auto-create blank timecards for all hourly staff
+  - [x] Prevent duplicates: Validate no existing record before insert
   - [ ] Test: Restart app mid-week → verify no duplicate timecards created
-- [ ] Implement `PayrollView` in `payroll.py`:
-  - [ ] "Missing Timecards" panel: Show hourly staff missing entries for current week (using `LEFT JOIN` logic)
-  - [ ] "Payroll Issuance" section:
-    - [ ] Button to generate weekly payroll (Monday via manual trigger in demo)
-    - [ ] For each hourly employee with complete timecard: `gross = hours_worked * hourly_wage`
-    - [ ] For each Rep this week: `commission = total_invoices_rep_wrote * 0.05` (5%)
-    - [ ] Export payroll to CSV: `employee_number | name | gross | commission | net`
-  - [ ] Button to "Issue Check": Records `Payment` for each employee, updates YTD sales
-  - [ ] Payroll history: List of past payroll runs (date, num checks issued)
+
+- [x] Implement `PayrollView` in `payroll.py`:
+  - [x] "Missing Timecards" panel: Show hourly staff missing entries for current week (using `LEFT JOIN` logic)
+  - [x] "Payroll Issuance" section:
+    - [x] Button to generate weekly payroll (Monday via manual trigger in demo)
+    - [x] For each hourly employee with complete timecard: `gross = hours_worked * hourly_wage`
+    - [x] For each Rep this week: `commission = total_invoices_rep_wrote * 0.05` (5%)
+    - [x] Export payroll to CSV: `employee_number | name | gross | commission | net`
+  - [x] Button to "Issue Check": Records `Payment` for each employee, updates YTD sales
+  - [x] Payroll history: List of past payroll runs (date, num checks issued)
+
 - [ ] Implement sales rep commission tracking:
-  - [ ] Identify invoices written by rep this week (filter by `invoices.rep_id`)
-  - [ ] Sum invoice totals, multiply by 0.05 → commission amount
+  - [x] Identify invoices written by rep this week (filter by `invoices.rep_id`)
+  - [x] Sum invoice totals, multiply by 0.05 → commission amount
   - [ ] Show in payroll export and Reports tab
-- [ ] Implement YTD sales update:
-  - [ ] Query `SUM(invoices.total_amount)` per rep since year start
-  - [ ] Store in employee record (or ephemeral in report)
-  - [ ] Display in Rep Performance report
+
+- [x] Implement YTD sales update:
+  - [x] Query `SUM(invoices.total_amount)` per rep since year start
+  - [x] Store in employee record (or ephemeral in report)
+  - [x] Display in Rep Performance report
+
 - [ ] **Deliverable:** Timecards auto-generate weekly. Payroll form calculates gross (hourly) + commission (5% reps) + YTD. Checks issued and exported.
 
 #### 2C. Advanced Reporting & Analytics (Week 4, Days 2–4) — **PRIORITY: HIGH**
@@ -200,18 +211,18 @@ Tasks mapped to: Req 5, 13; Technical items 5, 6, 14
   - [x] Display as critical alerts in top bar alert dropdown
   - [x] Show: Part #, Current Stock, Linked Unshipped Orders count
 - [ ] Implement inventory bottleneck detection (Technical item 5):
-  - [ ] Join `Invoice_Lines`, `Invoices`, `Parts`
-  - [ ] Filter: `Invoices.status = 'pending' AND Parts.stock_count <= 1`
+  - [x] Join `Invoice_Lines`, `Invoices`, `Parts`
+  - [x] Filter: `Invoices.status = 'pending' AND Parts.stock_count <= 1`
   - [ ] Show in alerts: "Order #X blocked: Part Y (stock: 0) needed"
 - [ ] Dynamic restocking strategy (Technical item 14):
-  - [ ] Find top 2 parts by YTD sales volume
-  - [ ] Double their `restock_value`
-  - [ ] Verify no unintended parts modified
+  - [x] Find top 2 parts by YTD sales volume
+  - [x] Double their `restock_value`
+  - [x] Verify no unintended parts modified
 - [ ] Price inflation logic (Technical item 15):
-  - [ ] Parts with 0 YTD sales:
-    - [ ] If `restock_value < 4`: price \*= 1.10
-    - [ ] If `restock_value >= 4`: price \*= 1.20
-  - [ ] Run logic on-demand (admin button or scheduled)
+  - [x] Parts with 0 YTD sales:
+    - [x] If `restock_value < 4`: price \*= 1.10
+    - [x] If `restock_value >= 4`: price \*= 1.20
+  - [x] Run logic on-demand (admin button or scheduled)
 - [ ] **Deliverable:** Critical alerts working, bottlenecks shown, dynamic restocking and pricing applied
 
 #### Phase 2 Summary
