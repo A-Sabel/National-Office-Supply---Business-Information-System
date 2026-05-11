@@ -256,7 +256,7 @@ class CustomersView(ctk.CTkFrame):
 
         # FIX: payment method values must match DB CHECK constraint: 'check', 'cash', 'transfer'
         self.method_dropdown = ctk.CTkComboBox(
-            self.payment_frame, values=["Cash", "Check", "Transfer"]
+            self.payment_frame, values=["cash", "check", "transfer"]
         )
         self.method_dropdown.pack(fill="x", padx=12, pady=6)
         self._style_input(self.method_dropdown)

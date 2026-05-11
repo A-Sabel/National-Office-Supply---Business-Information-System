@@ -52,6 +52,34 @@ class CustomerListReportView(ctk.CTkFrame):
         Cust No. | Company | Invoice No. | Invoice Date | Amount Due | Paid? | Shipped?
         (Assumption 1 track payments + Assumption 2 shipped + Assumption 3 paid)
     """
+
+    _SAMPLE_CUSTOMERS = (
+        # cust_no | company                   | address                   | phone          | balance   | status
+        ("C-1001", "Horizon School Inc.",      "12 Mabini St, QC",        "02-8100-0001",  15_420.00, "Active"),
+        ("C-1002", "Metro Academy",            "45 Rizal Ave, Manila",    "02-8100-0002",   3_800.00, "Active"),
+        ("C-1003", "Sunrise Daycare",          "7 Luna St, Pasig",        "02-8100-0003",       0.00, "Active"),
+        ("C-1004", "Greenleaf Montessori",     "88 Katipunan, QC",        "02-8100-0004",  31_075.00, "New"),
+        ("C-1005", "Capitol College",          "3 Pres. Quirino, Mla",    "02-8100-0005",       0.00, "Active"),
+        ("C-1006", "Northern Stars School",    "21 Baler St, Aurora",     "044-800-0001",   9_250.00, "Active"),
+        ("C-1007", "Pacific Learning Hub",     "15 Shaw Blvd, Mandaluyong","02-8100-0006",      0.00, "Inactive"),
+    )
+
+    _SAMPLE_INVOICES = (
+        # inv_no   | cust_no  | date         | amount     | paid  | shipped
+        ("I-2001", "C-1001",  "2006-07-15",   8_400.00,   True,   True),
+        ("I-2002", "C-1001",  "2006-07-28",  12_000.00,   True,   True),
+        ("I-2003", "C-1001",  "2006-08-05",  15_420.00,   False,  True),
+        ("I-2004", "C-1002",  "2006-07-20",   3_800.00,   False,  True),
+        ("I-2005", "C-1003",  "2006-08-01",  11_500.00,   True,   True),
+        ("I-2006", "C-1004",  "2006-08-07",  31_075.00,   False,  False),
+        ("I-2007", "C-1005",  "2006-06-10",  34_500.00,   True,   True),
+        ("I-2008", "C-1005",  "2006-07-30",  33_400.00,   True,   True),
+        ("I-2009", "C-1006",  "2006-07-25",   8_500.00,   True,   True),
+        ("I-2010", "C-1006",  "2006-08-03",  16_250.00,   True,   True),
+        ("I-2011", "C-1006",  "2006-08-08",   9_250.00,   False,  True),
+        ("I-2012", "C-1007",  "2006-05-12",   5_800.00,   True,   True),
+    )
+
     def __init__(
         self, parent,
         controller=None,
@@ -99,7 +127,7 @@ class CustomerListReportView(ctk.CTkFrame):
     # ── Data loaders ──────────────────────────────────────────────────────────
     def _load_customers(self):
         if not self.db_config:
-            return []
+            return list(self._SAMPLE_CUSTOMERS)
         try:
             conn = psycopg2.connect(**self.db_config)
             with conn.cursor() as cur:
@@ -116,14 +144,14 @@ class CustomerListReportView(ctk.CTkFrame):
                 """)
                 rows = cur.fetchall()
             conn.close()
-            return rows if rows else []
+            return rows if rows else list(self._SAMPLE_CUSTOMERS)
         except Exception as e:
             print(f"[CustomerList] _load_customers failed: {e}")
-            return []
+            return list(self._SAMPLE_CUSTOMERS)
 
     def _load_invoices(self):
         if not self.db_config:
-            return []
+            return list(self._SAMPLE_INVOICES)
         try:
             conn = psycopg2.connect(**self.db_config)
             with conn.cursor() as cur:
@@ -140,29 +168,10 @@ class CustomerListReportView(ctk.CTkFrame):
                 """)
                 rows = cur.fetchall()
             conn.close()
-            return rows if rows else []
+            return rows if rows else list(self._SAMPLE_INVOICES)
         except Exception as e:
             print(f"[CustomerList] _load_invoices failed: {e}")
-            return []
-
-    def refresh_data(self):
-        """Re-fetch from DB and update summary cards + both tables."""
-        self.customers = self._load_customers()
-        self.invoices  = self._load_invoices()
-        self._update_summary_cards()
-        self._apply_filter()
-        self._populate_balances()
-
-    def _update_summary_cards(self):
-        """Update KPI card labels with current data (no widget rebuild needed)."""
-        total   = len(self.customers)
-        active  = sum(1 for c in self.customers if c[5] == "Active")
-        balance = sum(float(c[4] or 0) for c in self.customers)
-        unpaid  = sum(1 for i in self.invoices if not i[4])
-        self._card_total.configure(text=str(total))
-        self._card_active.configure(text=str(active))
-        self._card_balance.configure(text=f"₱{balance:,.2f}")
-        self._card_unpaid.configure(text=str(unpaid))
+            return list(self._SAMPLE_INVOICES)
 
     # ── Header ────────────────────────────────────────────────────────────────
     def _build_header(self):
@@ -200,13 +209,6 @@ class CustomerListReportView(ctk.CTkFrame):
         right.pack(side="right")
 
         ctk.CTkButton(
-            right, text="↻  Refresh", width=110, height=34,
-            corner_radius=6, fg_color="#e8f5e9", hover_color="#c8e6c9",
-            text_color="#2e7d32", font=FONT_BTN,
-            command=self.refresh_data,
-        ).pack(side="left", padx=(0, 8))
-
-        ctk.CTkButton(
             right, text="🖨  Print", width=100, height=34,
             corner_radius=6, fg_color="#ecf0f1",
             text_color=TEXT_DARK, hover_color=BORDER, font=FONT_BODY,
@@ -227,29 +229,23 @@ class CustomerListReportView(ctk.CTkFrame):
 
     # ── KPI strip ─────────────────────────────────────────────────────────────
     def _build_summary_strip(self):
-        self._summary_strip = ctk.CTkFrame(self._body, fg_color="transparent")
-        self._summary_strip.pack(fill="x", padx=30, pady=(18, 0))
-        self._summary_strip.columnconfigure((0, 1, 2, 3), weight=1, pad=12)
+        strip = ctk.CTkFrame(self._body, fg_color="transparent")
+        strip.pack(fill="x", padx=30, pady=(18, 0))
+        strip.columnconfigure((0, 1, 2, 3), weight=1, pad=12)
 
         total   = len(self.customers)
         active  = sum(1 for c in self.customers if c[5] == "Active")
-        balance = sum(float(c[4] or 0) for c in self.customers)
+        balance = sum(c[4] for c in self.customers)
         unpaid  = sum(1 for i in self.invoices if not i[4])
 
-        def _make_card(parent, title, value, subtitle, icon, color, col):
-            card = ctk.CTkFrame(parent, fg_color=BG_CARD, corner_radius=12, border_width=1, border_color=BORDER)
-            card.grid(row=0, column=col, sticky="nsew", padx=6)
-            ctk.CTkLabel(card, text=icon,     font=("Segoe UI", 24)).pack(anchor="w", padx=16, pady=(14, 0))
-            lbl = ctk.CTkLabel(card, text=value, font=("Segoe UI", 28, "bold"), text_color=color)
-            lbl.pack(anchor="w", padx=16)
-            ctk.CTkLabel(card, text=title,    font=FONT_BODY,  text_color=TEXT_DARK).pack(anchor="w", padx=16)
-            ctk.CTkLabel(card, text=subtitle, font=FONT_SMALL, text_color=TEXT_MUTED).pack(anchor="w", padx=16, pady=(0, 14))
-            return lbl
-
-        self._card_total   = _make_card(self._summary_strip, "Total Customers",   str(total),         "All registered accounts", "👥", BRAND_BLUE,   0)
-        self._card_active  = _make_card(self._summary_strip, "Active Accounts",   str(active),        "Currently purchasing",    "✅", ACCENT_GREEN, 1)
-        self._card_balance = _make_card(self._summary_strip, "Total Outstanding", f"₱{balance:,.2f}", "Unpaid balances",         "💳", ACCENT_AMBER, 2)
-        self._card_unpaid  = _make_card(self._summary_strip, "Unpaid Invoices",   str(unpaid),        "Awaiting payment",        "🚨", ACCENT_RED,   3)
+        SummaryCard(strip, "Total Customers",   str(total),
+                    "All registered accounts",   "👥", BRAND_BLUE  ).grid(row=0, column=0, sticky="nsew", padx=6)
+        SummaryCard(strip, "Active Accounts",   str(active),
+                    "Currently purchasing",       "✅", ACCENT_GREEN).grid(row=0, column=1, sticky="nsew", padx=6)
+        SummaryCard(strip, "Total Outstanding", f"₱{balance:,.2f}",
+                    "Unpaid balances",            "💳", ACCENT_AMBER).grid(row=0, column=2, sticky="nsew", padx=6)
+        SummaryCard(strip, "Unpaid Invoices",   str(unpaid),
+                    "Awaiting payment",           "🚨", ACCENT_RED  ).grid(row=0, column=3, sticky="nsew", padx=6)
 
     # ── Filter bar ────────────────────────────────────────────────────────────
     def _build_filter_bar(self):
