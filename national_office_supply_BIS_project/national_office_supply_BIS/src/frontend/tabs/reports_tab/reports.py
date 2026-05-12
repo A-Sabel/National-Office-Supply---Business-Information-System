@@ -17,6 +17,7 @@ from typing import TypedDict
 from frontend.tabs.reports_tab.weekly_sales import WeeklySalesReportView
 from frontend.tabs.reports_tab.stock_ordering import StockOrderingReportView
 from frontend.tabs.reports_tab.audit_log import AuditLogReportView
+from frontend.tabs.reports_tab.backlog_report import BacklogReportView
 from frontend.modular.reports_sidebar import ReportsSidebar
 from frontend.tabs.reports_tab.inventory_report import InventorySalesReportView
 from frontend.tabs.reports_tab.customerList_balances import CustomerListReportView
@@ -40,6 +41,7 @@ class ReportsHubView(ctk.CTkFrame):
         ("inventory_report", "Inventory Report"),
         ("weekly_sales", "Weekly Sales Report"),
         ("stock_ordering", "Stock Ordering Report"),
+        ("backlog_report", "Backlog Tracking"),
         ("customer_balances", "Customer List & Balances"),
         ("customer_payments", "Customer Payment History"),
         ("audit_log", "Audit Log"),
@@ -57,6 +59,10 @@ class ReportsHubView(ctk.CTkFrame):
         "stock_ordering": {
             "subtitle": "QD-Sec6, 13",
             "description": "Reorder recommendations, shortages, and ordering summary.",
+        },
+        "backlog_report": {
+            "subtitle": "QD-Sec10 - Ordered parts not yet shipped",
+            "description": "Track all open orders and pending line items across the business.",
         },
         "customer_balances": {
             "subtitle": "Customer receivables snapshot",
@@ -246,6 +252,14 @@ class ReportsHubView(ctk.CTkFrame):
             )
         elif section_key == "customer_payments":
             return CustomerPaymentHistoryView(
+                self.view_host,
+                controller=self.controller,
+                db_config=self.db_config,
+                on_toggle_navigation=self.toggle_navigation,
+                is_navigation_visible=self._sidebar_visible,
+            )
+        elif section_key == "backlog_report":
+            return BacklogReportView(
                 self.view_host,
                 controller=self.controller,
                 db_config=self.db_config,

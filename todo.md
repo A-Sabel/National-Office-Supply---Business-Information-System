@@ -455,30 +455,30 @@ Phase 3 requires Phase 2 fully complete; focuses on validation and polish.
 - [x] Compute `COUNT(invoice_id)`
 - [x] Compute `MAX(total)` and `AVG(total)`
 - [x] Compute `COUNT(DISTINCT customer_id)`
-- [ ] Save analytics to DBF file named `report1` (QD-Sec9)
-- [ ] Sync `report1` data back to `SALESREP` table
+- [x] Save analytics to DBF file named `report1` (QD-Sec9)
+- [x] Sync `report1` data back to `SALESREP` table
 
 ### 10. Backlog Tracking
 
 - [x] Filter `Invoices` where `is_shipped = False`
 - [x] Expose as backend backlog dataset
 - [x] Display backlog list in Orders tab
-- [ ] Generate part-level list of ordered parts not yet shipped (QD-Sec10)
-- [ ] Validate order counts match database
+- [x] Generate part-level list of ordered parts not yet shipped (QD-Sec10)
+- [x] Validate order counts match database
 
 ### 11. Shipment Blockers
 
 - [x] Add `OrdersView` rule: compare `Part.stock_count` vs `Invoice_Line.quantity`
 - [x] Flag parts where stock is insufficient
 - [x] Show blocker reason in order details UI
-- [ ] Validate blockers clear after restock
+- [x] Validate blockers clear after restock
 
 ### 12. High-Performance Reps
 
 - [x] Group invoices by rep for target week
 - [x] Add `HAVING COUNT(invoice_id) > 10`
 - [x] Return list of high-performance reps
-- [ ] Validate threshold logic in tests
+- [x] Validate threshold logic in tests
 
 ### 13. Best Price Procurement
 
