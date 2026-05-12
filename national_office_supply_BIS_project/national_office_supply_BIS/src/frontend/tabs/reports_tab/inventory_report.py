@@ -9,6 +9,7 @@ import customtkinter as ctk
 import psycopg2
 
 from backend.report_service import ReportService
+from .csv_tab import export_inventory
 
 # ── Colour palette ────────────────────────────────────────────────────────────
 BRAND_NAVY = "#001440"
@@ -307,18 +308,6 @@ class InventorySalesReportView(ctk.CTkFrame):
 
         ctk.CTkButton(
             right,
-            text="🖨  Print",
-            width=100,
-            height=34,
-            corner_radius=6,
-            fg_color="#ecf0f1",
-            text_color=TEXT_DARK,
-            hover_color=BORDER,
-            font=FONT_BODY,
-        ).pack(side="left", padx=(0, 8))
-
-        ctk.CTkButton(
-            right,
             text="⬇  Export CSV",
             width=130,
             height=34,
@@ -328,15 +317,27 @@ class InventorySalesReportView(ctk.CTkFrame):
             text_color=TEXT_WHITE,
             font=FONT_BTN,
             command=self._export_csv,
-        ).pack(side="left")
+        ).pack(side="right")
+
+        ctk.CTkButton(
+            right,
+            text="↺  Refresh",
+            width=110,
+            height=34,
+            corner_radius=6,
+            fg_color="transparent",
+            hover_color="#e8f4fd",
+            text_color=BRAND_BLUE,
+            border_width=1,
+            border_color=BRAND_BLUE,
+            font=FONT_BTN,
+            command=self._apply_filter,
+        ).pack(side="right", padx=(0, 10))
 
     def _handle_nav_toggle(self):
-        """Tell the parent hub to toggle the sidebar, then flip the arrow."""
+        """Tell the parent hub to toggle the sidebar."""
         if callable(self._on_toggle_navigation):
             self._on_toggle_navigation()
-        # Flip local state and arrow immediately
-        self._is_navigation_visible = not self._is_navigation_visible
-        self._nav_toggle_btn.configure(text="◀" if self._is_navigation_visible else "▶")
 
     # ==================================================================
     # KPI strip
@@ -815,33 +816,5 @@ class InventorySalesReportView(ctk.CTkFrame):
     # CSV export  — exports whatever is currently in the Overview table
     # ==================================================================
     def _export_csv(self):
-        today = datetime.date.today().strftime("%Y-%m-%d")
-        path = fd.asksaveasfilename(
-            defaultextension=".csv",
-            filetypes=[("CSV files", "*.csv")],
-            initialfile=f"inventory_report_{today}.csv",
-            title="Save Inventory Report",
-        )
-        if not path:
-            return  # user cancelled
-
-        headers = (
-            "Part No.",
-            "Description",
-            "Sell Price",
-            "In Stock",
-            "Trigger",
-            "On Order",
-            "Status",
-        )
-        try:
-            with open(path, "w", newline="", encoding="utf-8") as f:
-                writer = csv.writer(f)
-                writer.writerow(headers)
-                for iid in self._overview_tree.get_children():
-                    writer.writerow(self._overview_tree.item(iid, "values"))
-            messagebox.showinfo(
-                "Export Complete", f"Inventory report saved to:\n{path}"
-            )
-        except Exception as ex:
-            messagebox.showerror("Export Failed", str(ex))
+        rows = [self._overview_tree.item(iid, "values") for iid in self._overview_tree.get_children()]
+        export_inventory(self, rows)

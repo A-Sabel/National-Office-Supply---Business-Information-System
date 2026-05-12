@@ -32,9 +32,9 @@ class NationalOfficeApp(ctk.CTk):
 
         # 1. Initialize DB Config
         self.db_config: DBConfig = {
-            "dbname": os.getenv("DB_NAME", "postgres"),
+            "dbname": os.getenv("DB_NAME", "NOS_DB"),
             "user": os.getenv("DB_USER", "postgres"),
-            "password": os.getenv("DB_PASS", ""),
+            "password": os.getenv("DB_PASS", "twicejjang123"),
             "host": os.getenv("DB_HOST", "localhost"),
             "port": int(os.getenv("DB_PORT", 5432)),
         }
