@@ -2,6 +2,10 @@ import customtkinter as ctk
 from tkinter import ttk, messagebox
 from datetime import datetime, date, timedelta
 
+from backend.employee_service import EmployeeService
+from backend.audit_logger import write_audit_log
+from backend.timecard_service import TimecardService
+
 try:
     import psycopg2
     import psycopg2.extras
@@ -58,10 +62,11 @@ def auto_generate_timecards(db_config):
                 INSERT INTO timecards (employee_number, week_date, hours_worked)
                 VALUES (%s, %s, 0)
                 ON CONFLICT DO NOTHING
+                RETURNING timecard_id
             """,
                 (emp_num, week),
             )
-            inserted += 1
+            inserted += len(cur.fetchall())
 
         conn.commit()
         cur.close()
@@ -111,9 +116,10 @@ class _SummaryCard(ctk.CTkFrame):
 # REVISED: show-all SSN button, per-row eye icon, tighter table spacing
 # ─────────────────────────────────────────────────────────────────────────────
 class _WorkerFilesPanel(ctk.CTkFrame):
-    def __init__(self, parent, db_config):
+    def __init__(self, parent, db_config, session_manager=None):
         super().__init__(parent, fg_color="transparent")
         self.db_config = db_config
+        self._employee_service = EmployeeService(db_config, session_manager)
         self._revealed = {}
         self._all_revealed = False
         self._search_var = ctk.StringVar()
@@ -270,27 +276,19 @@ class _WorkerFilesPanel(ctk.CTkFrame):
 
     def _load_db(self):
         try:
-            conn = _get_conn(self.db_config)
-            cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)  # type: ignore[attr-defined]
-            cur.execute("""
-                SELECT employee_name,
-                       position,
-                       COALESCE('P' || hourly_wage::text, 'N/A') AS hourly_wage,
-                       ssn
-                FROM   employees
-                WHERE  is_active = TRUE
-                ORDER  BY employee_name
-            """)
-            rows = cur.fetchall()
-            cur.close()
-            conn.close()
+            rows = self._employee_service.get_all() if self._employee_service else []
+            rows = [row for row in rows if row.get("is_active")]
 
             self._all_rows = [
                 (
                     r["employee_name"],
                     r["position"],
-                    r["hourly_wage"],
-                    "***-**-" + r["ssn"][-4:],
+                    (
+                        f"P{float(r['hourly_wage']):,.2f}"
+                        if r.get("hourly_wage") is not None
+                        else "N/A"
+                    ),
+                    "***-**-" + str(r["ssn"])[-4:],
                     "👁",
                 )
                 for r in rows
@@ -373,6 +371,8 @@ class _AuditPanel(ctk.CTkFrame):
         super().__init__(parent, fg_color="transparent")
         self.db_config = db_config
         self._session_manager = session_manager
+        self._timecard_service = TimecardService(db_config, session_manager)
+        self._employee_service = EmployeeService(db_config, session_manager)
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(1, weight=1)
 
@@ -596,42 +596,20 @@ class _AuditPanel(ctk.CTkFrame):
     # ── DB load ───────────────────────────────────────────────────────────────
     def _load_db(self):
         try:
-            conn = _get_conn(self.db_config)
-            cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)  # type: ignore[attr-defined]
-
-            cur.execute(
-                """
-                SELECT e.employee_name, e.position
-                FROM   employees e
-                LEFT JOIN timecards t
-                    ON  t.employee_number = e.employee_number
-                    AND t.week_date = %s
-                WHERE  e.is_active = TRUE
-                  AND  e.position  = 'Hourly'
-                  AND  t.timecard_id IS NULL
-                ORDER  BY e.employee_name
-            """,
-                (self._week,),
+            missing = (
+                self._timecard_service.get_missing_timecards(self._week)
+                if self._timecard_service
+                else []
             )
-            missing = cur.fetchall()
-
-            cur.execute(
-                """
-                SELECT COALESCE(SUM(t.hours_worked * COALESCE(e.hourly_wage,0)),0)
-                       AS gross
-                FROM   timecards t
-                JOIN   employees e ON e.employee_number = t.employee_number
-                WHERE  e.is_active = TRUE
-                  AND  e.position  = 'Hourly'
-                  AND  t.week_date = %s
-            """,
-                (self._week,),
+            week_timecards = (
+                self._timecard_service.get_timecards_for_week(self._week)
+                if self._timecard_service
+                else []
             )
-            result = cur.fetchone()
-            gross = result[0] if result else 0
-
-            cur.close()
-            conn.close()
+            gross = sum(
+                float(row.get("hours_worked") or 0) * float(row.get("hourly_wage") or 0)
+                for row in week_timecards
+            )
 
         except Exception as e:
             messagebox.showerror("DB Error", f"Audit load failed:\n{e}")
@@ -757,20 +735,12 @@ class _AuditPanel(ctk.CTkFrame):
             week_end = self._week + timedelta(days=6)
 
             # ── hourly employees ──────────────────────────────────────────────
-            cur.execute(
-                """
-                SELECT e.employee_number, t.timecard_id,
-                       ROUND((t.hours_worked * COALESCE(e.hourly_wage,0))::numeric,2)
-                           AS gross_pay
-                FROM   timecards t
-                JOIN   employees e ON e.employee_number = t.employee_number
-                WHERE  e.is_active = TRUE
-                  AND  e.position  = 'Hourly'
-                  AND  t.week_date = %s
-            """,
-                (self._week,),
+            hourly_rows = (
+                self._timecard_service.get_timecards_for_week(self._week)
+                if self._timecard_service
+                else []
             )
-            for row in cur.fetchall():
+            for row in hourly_rows:
                 cur.execute(
                     """
                     INSERT INTO employee_payments
@@ -778,15 +748,39 @@ class _AuditPanel(ctk.CTkFrame):
                          amount_paid, date_paid, payment_type)
                     VALUES (%s, %s, %s, %s, CURRENT_DATE, 'hourly')
                     ON CONFLICT DO NOTHING
+                    RETURNING payment_id
                 """,
                     (
                         row["employee_number"],
                         row["timecard_id"],
                         _check_no(),
-                        row["gross_pay"],
+                        round(
+                            float(row.get("hours_worked") or 0)
+                            * float(row.get("hourly_wage") or 0),
+                            2,
+                        ),
                     ),
                 )
-                inserted += 1
+                payment_row = cur.fetchone()
+                if payment_row:
+                    inserted += 1
+                    write_audit_log(
+                        conn,
+                        self._session_manager,
+                        "PAYROLL_ISSUED",
+                        "Payments",
+                        payment_row[0],
+                        {
+                            "employee_id": row["employee_number"],
+                            "amount": round(
+                                float(row.get("hours_worked") or 0)
+                                * float(row.get("hourly_wage") or 0),
+                                2,
+                            ),
+                            "payment_type": "hourly",
+                            "week_date": str(self._week),
+                        },
+                    )
 
             # ── sales reps — commission ───────────────────────────────────────
             cur.execute(
@@ -823,10 +817,26 @@ class _AuditPanel(ctk.CTkFrame):
                         (employee_number, invoice_period_end, check_number,
                          amount_paid, date_paid, payment_type)
                     VALUES (%s, %s, %s, %s, CURRENT_DATE, 'commission')
+                    RETURNING payment_id
                 """,
                     (row["employee_number"], week_end, _check_no(), row["commission"]),
                 )
-                inserted += 1
+                payment_row = cur.fetchone()
+                if payment_row:
+                    inserted += 1
+                    write_audit_log(
+                        conn,
+                        self._session_manager,
+                        "PAYROLL_ISSUED",
+                        "Payments",
+                        payment_row[0],
+                        {
+                            "employee_id": row["employee_number"],
+                            "amount": row["commission"],
+                            "payment_type": "commission",
+                            "week_end": str(week_end),
+                        },
+                    )
 
             # ── update YTD sales for all reps ─────────────────────────────────
             cur.execute("""
@@ -877,22 +887,11 @@ class _AuditPanel(ctk.CTkFrame):
             cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)  # type: ignore[attr-defined]
 
             # Hourly employees
-            cur.execute(
-                """
-                SELECT e.employee_number, e.employee_name,
-                       'Hourly' AS pay_type,
-                       ROUND((t.hours_worked * COALESCE(e.hourly_wage,0))::numeric,2)
-                           AS gross,
-                       0.00 AS commission
-                FROM   timecards t
-                JOIN   employees e ON e.employee_number = t.employee_number
-                WHERE  e.is_active = TRUE
-                  AND  e.position  = 'Hourly'
-                  AND  t.week_date = %s
-            """,
-                (self._week,),
+            hourly_rows = (
+                self._timecard_service.get_timecards_for_week(self._week)
+                if self._timecard_service
+                else []
             )
-            hourly_rows = cur.fetchall()
 
             # Sales reps
             cur.execute(
@@ -1313,9 +1312,11 @@ class _TimecardPanel(ctk.CTkFrame):
                 VALUES (%s, %s, %s)
                 ON CONFLICT (employee_number, week_date)
                 DO UPDATE SET hours_worked = EXCLUDED.hours_worked
+                RETURNING timecard_id
             """,
                 (self.employee_number, self._week, hrs),
             )
+            timecard_id = cur.fetchone()[0]
             conn.commit()
             cur.close()
             conn.close()
@@ -1327,6 +1328,10 @@ class _TimecardPanel(ctk.CTkFrame):
             self._hours.delete(0, "end")
             self._notes.delete(0, "end")
             self._load_history()
+        except PermissionError as e:
+            messagebox.showerror("Access Denied", str(e))
+        except ValueError as e:
+            messagebox.showerror("Validation Error", str(e))
         except Exception as e:
             messagebox.showerror("DB Error", f"Timecard submission failed:\n{e}")
 
@@ -1852,7 +1857,9 @@ class PayrollView(ctk.CTkFrame):
             w.destroy()
 
         panel = {
-            "worker_files": lambda: _WorkerFilesPanel(self._scroll, self.db_config),
+            "worker_files": lambda: _WorkerFilesPanel(
+                self._scroll, self.db_config, self._session_manager
+            ),
             "audit": lambda: _AuditPanel(
                 self._scroll, self.db_config, self._session_manager
             ),

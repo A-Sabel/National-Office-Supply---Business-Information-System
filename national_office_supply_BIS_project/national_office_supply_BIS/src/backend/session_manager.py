@@ -92,3 +92,51 @@ class SessionManager:
             employee_number=self.session.employee_number,
             employee_name=self.session.employee_name,
         )
+
+    # ---- RBAC Helper Methods ----
+
+    def is_manager(self) -> bool:
+        """Check if current user is a Manager."""
+        return self.has_role(["Manager"])
+
+    def is_sales_rep(self) -> bool:
+        """Check if current user is a Sales Rep."""
+        return self.has_role(["Sales Rep"])
+
+    def is_hourly(self) -> bool:
+        """Check if current user is Hourly staff."""
+        return self.has_role(["Hourly"])
+
+    def can_edit_payroll(self) -> bool:
+        """Only Managers can edit payroll."""
+        return self.is_manager()
+
+    def can_edit_prices(self) -> bool:
+        """Only Managers can edit part prices."""
+        return self.is_manager()
+
+    def can_create_invoices(self) -> bool:
+        """Sales Reps and Managers can create invoices."""
+        return self.has_role(["Sales Rep", "Manager"])
+
+    def can_view_timecards(self) -> bool:
+        """Only Managers can view timecards."""
+        return self.is_manager()
+
+    def get_session_age_minutes(self) -> int:
+        """Get the age of the session in minutes."""
+        if self.started_at is None:
+            return 0
+        return int((datetime.now() - self.started_at).total_seconds() / 60)
+
+    def get_inactivity_minutes(self) -> int:
+        """Get minutes since last activity."""
+        if self.last_activity_at is None:
+            return 0
+        return int((datetime.now() - self.last_activity_at).total_seconds() / 60)
+
+    def get_remaining_minutes(self) -> int:
+        """Get minutes until session timeout."""
+        inactivity = self.get_inactivity_minutes()
+        remaining = self.timeout_minutes - inactivity
+        return max(0, remaining)

@@ -2,18 +2,24 @@ import tkinter as tk
 import customtkinter as ctk
 from tkinter import messagebox
 from datetime import date
-from typing import Any
+from decimal import Decimal
+from typing import Any, Literal
 
 # ── optional DB import ─────────────────────────────────────────────────────────
 try:
     import psycopg2
-    import psycopg2.extras
+    from psycopg2 import extras as psycopg2_extras
 
     HAS_DB = True
 except ImportError:
     psycopg2 = None
+    psycopg2_extras = None
     HAS_DB = False
 
+from backend.invoice_service import InvoiceService
+from backend.part_service import PartService
+from backend.audit_logger import write_audit_log
+from utils.id_formatter import fmt_invoice
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  COLOUR & FONT TOKENS  (unchanged from original)
@@ -56,10 +62,10 @@ FONT_H3 = ("Segoe UI", 12, "bold")
 #  HELPERS
 # ══════════════════════════════════════════════════════════════════════════════
 STATUS_CFG = {
-    "active":  {"bg": "#dbeafe", "fg": "#1d4ed8", "label": "Active"},
+    "active": {"bg": "#dbeafe", "fg": "#1d4ed8", "label": "Active"},
     "shipped": {"bg": "#ede9fe", "fg": "#7c3aed", "label": "Shipped"},
-    "paid":    {"bg": "#ccfbf1", "fg": "#0d9488", "label": "Paid"},
-    "void":    {"bg": "#f1f5f9", "fg": "#6b7280", "label": "Void"},
+    "paid": {"bg": "#ccfbf1", "fg": "#0d9488", "label": "Paid"},
+    "void": {"bg": "#f1f5f9", "fg": "#6b7280", "label": "Void"},
 }
 
 
@@ -91,11 +97,15 @@ def fmt_currency(val):
 #  DB LAYER  ── all DB calls live here so UI classes stay clean
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 class OrdersDB:
     """Thin data-access layer for the Orders & Invoices tab."""
 
-    def __init__(self, db_config: dict):
+    def __init__(self, db_config: dict, session_manager=None):
         self.cfg = db_config
+        self._session_manager = session_manager
+        self._invoice_service = InvoiceService(db_config, session_manager)
+        self._part_service = PartService(db_config, session_manager)
 
     def _connect(self):
         """Return a live psycopg2 connection or raise ConnectionError."""
@@ -112,24 +122,87 @@ class OrdersDB:
         except Exception as exc:
             raise ConnectionError(f"Cannot connect to database: {exc}") from exc
 
+    def _ensure_active_session(self, allowed_roles=None):
+        if self._session_manager is not None:
+            self._session_manager.ensure_active(allowed_roles)
+
+    def _dict_cursor_factory(self):
+        if not HAS_DB or psycopg2 is None or psycopg2_extras is None:
+            raise ConnectionError("psycopg2 is not installed.")
+        return psycopg2_extras.DictCursor
+
+    def get_customer_address(self, customer_number: int) -> str | None:
+        """Return a single-line address for the customer, or None if unavailable."""
+        if not customer_number:
+            return None
+        try:
+            conn = self._connect()
+        except Exception as exc:
+            print(f"[OrdersDB] get_customer_address connection failed: {exc}")
+            return None
+
+        try:
+            with conn, conn.cursor(cursor_factory=self._dict_cursor_factory()) as cur:
+                # Schema defines `address` column on customers — query only that.
+                cur.execute(
+                    "SELECT address FROM customers WHERE customer_number = %s",
+                    (customer_number,),
+                )
+                row = cur.fetchone()
+                if not row:
+                    return None
+                # DictCursor returns mapping-like; otherwise tuple with single element
+                if hasattr(row, "get"):
+                    return row.get("address")
+                return row[0] if row and len(row) >= 1 else None
+        except Exception as exc:
+            print(f"[OrdersDB] get_customer_address query failed: {exc}")
+            return None
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
     # ------------------------------------------------------------------
     # READ helpers
     # ------------------------------------------------------------------
 
     def fetch_invoices(self, status_filter: str | None = None) -> list[dict]:
         """Return the 200 most-recent invoices with customer and rep names.
-        
+
         Args:
             status_filter: If provided, only return invoices matching this status
                           (e.g. 'active', 'shipped'). None returns all statuses.
         """
+        if self._invoice_service is not None:
+            rows = self._invoice_service.get_recent_invoices(
+                status_filter=status_filter
+            )
+            # Enrich with customer address if missing so dialogs can display it
+            for r in rows:
+                if "address" not in r or not r.get("address"):
+                    try:
+                        cust_num = r.get("customer_number")
+                        if cust_num is None:
+                            r["address"] = "—"
+                        else:
+                            # ensure we pass an int
+                            addr = self.get_customer_address(int(cust_num))
+                            r["address"] = addr or "—"
+                    except Exception as exc:
+                        print(
+                            f"[OrdersDB] could not enrich address for customer {r.get('customer_number')}: {exc}"
+                        )
+                        r["address"] = "—"
+            return rows
+
         sql = """
             SELECT
                 i.invoice_id,
                 i.invoice_id::text           AS invoice_number,
                 c.customer_name              AS customer_name,
                 c.company_name               AS company_name,
-                c.address                    AS customer_address,
                 c.customer_number,
                 COALESCE(i.total_amount, 0)  AS amount,
                 i.status,
@@ -141,14 +214,19 @@ class OrdersDB:
             JOIN employees e ON e.employee_number = i.employee_number
         """
         params: tuple = ()
-        if status_filter and status_filter.lower() in ("active", "shipped", "paid", "void"):
+        if status_filter and status_filter.lower() in (
+            "active",
+            "shipped",
+            "paid",
+            "void",
+        ):
             sql += " WHERE i.status = %s"
             params = (status_filter.lower(),)
         sql += " ORDER BY i.date_written DESC, i.invoice_id DESC LIMIT 200"
 
         conn = self._connect()
         try:
-            with conn, conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+            with conn, conn.cursor(cursor_factory=self._dict_cursor_factory()) as cur:
                 cur.execute(sql, params)
                 rows = [dict(r) for r in cur.fetchall()]
                 for r in rows:
@@ -159,6 +237,9 @@ class OrdersDB:
 
     def fetch_invoice_lines(self, invoice_id: int) -> list[dict]:
         """Return line items for a single invoice."""
+        if self._invoice_service is not None:
+            return self._invoice_service.get_invoice_lines(invoice_id)
+
         sql = """
             SELECT
                 il.part_number,
@@ -173,7 +254,7 @@ class OrdersDB:
         """
         conn = self._connect()
         try:
-            with conn, conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+            with conn, conn.cursor(cursor_factory=self._dict_cursor_factory()) as cur:
                 cur.execute(sql, (invoice_id,))
                 return [dict(r) for r in cur.fetchall()]
         finally:
@@ -182,14 +263,14 @@ class OrdersDB:
     def fetch_active_customers(self) -> list[dict]:
         """Return id + names for every active customer (for the create-invoice dropdown)."""
         sql = """
-            SELECT customer_number, customer_name, company_name, address
+            SELECT customer_number, customer_name, company_name
             FROM customers
             WHERE is_active = TRUE
             ORDER BY company_name
         """
         conn = self._connect()
         try:
-            with conn, conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+            with conn, conn.cursor(cursor_factory=self._dict_cursor_factory()) as cur:
                 cur.execute(sql)
                 return [dict(r) for r in cur.fetchall()]
         finally:
@@ -197,6 +278,18 @@ class OrdersDB:
 
     def fetch_parts(self) -> list[dict]:
         """Return all parts with stock and price for the line-item picker."""
+        if self._part_service is not None:
+            rows = self._part_service.get_all()
+            return [
+                {
+                    "part_number": row["part_number"],
+                    "description": row["description"],
+                    "selling_price": row["selling_price"],
+                    "stock_count": row["stock_count"],
+                }
+                for row in rows
+            ]
+
         sql = """
             SELECT part_number, description, selling_price, stock_count
             FROM parts
@@ -204,7 +297,7 @@ class OrdersDB:
         """
         conn = self._connect()
         try:
-            with conn, conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+            with conn, conn.cursor(cursor_factory=self._dict_cursor_factory()) as cur:
                 cur.execute(sql)
                 return [dict(r) for r in cur.fetchall()]
         finally:
@@ -233,7 +326,7 @@ class OrdersDB:
         errors: list[str] = []
         conn = self._connect()
         try:
-            with conn, conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+            with conn, conn.cursor(cursor_factory=self._dict_cursor_factory()) as cur:
                 # Rule 1 — customer active check
                 cur.execute(
                     "SELECT is_active FROM customers WHERE customer_number = %s",
@@ -260,14 +353,18 @@ class OrdersDB:
                         continue  # skip further checks for this line
 
                     # Rule 3 — part exists and has stock
-                    cur.execute(
-                        "SELECT description, selling_price, stock_count FROM parts WHERE part_number = %s",
-                        (pnum,),
-                    )
-                    part_row = cur.fetchone()
+                    if self._part_service is not None:
+                        part_row = self._part_service.get_by_id(pnum)
+                    else:
+                        cur.execute(
+                            "SELECT description, selling_price, stock_count FROM parts WHERE part_number = %s",
+                            (pnum,),
+                        )
+                        part_row = cur.fetchone()
                     if not part_row:
                         errors.append(f"Part #{pnum} does not exist in inventory.")
                         continue
+                    assert part_row is not None
 
                     if not manager_override and part_row["stock_count"] < qty:
                         errors.append(
@@ -307,6 +404,7 @@ class OrdersDB:
         Returns the new invoice row as a dict.
         Raises ValueError with a human-readable message on validation failure.
         """
+        self._ensure_active_session(["Manager", "Sales Rep"])
         # ── Backend validation ──────────────────────────────────────────────
         errors = self.validate_order(customer_number, line_items, manager_override)
         if errors:
@@ -317,10 +415,33 @@ class OrdersDB:
             round(item["quantity"] * item["unit_price"], 2) for item in line_items
         )
 
+        if self._invoice_service is not None:
+            invoice_id = self._invoice_service.create(
+                customer_number,
+                employee_number,
+                total_amount=Decimal(str(recalculated_total)),
+            )
+            if not invoice_id:
+                raise ValueError("Could not create invoice.")
+
+            for item in line_items:
+                self._invoice_service.add_line_item(
+                    invoice_id,
+                    item["part_number"],
+                    item["quantity"],
+                )
+
+            return {
+                "invoice_id": invoice_id,
+                "invoice_number": f"INV-{invoice_id}",
+                "date": date.today().isoformat(),
+                "total": recalculated_total,
+            }
+
         conn = self._connect()
         try:
             with conn:
-                with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+                with conn.cursor(cursor_factory=self._dict_cursor_factory()) as cur:
                     # 1. Create the invoice header (status = 'active')
                     cur.execute(
                         """
@@ -332,6 +453,7 @@ class OrdersDB:
                         (employee_number, customer_number, recalculated_total),
                     )
                     row = cur.fetchone()
+                    assert row is not None
                     invoice_id = row["invoice_id"]
                     date_written = row["date_written"]
 
@@ -369,10 +491,11 @@ class OrdersDB:
         Allowed only when current status is 'active'.
         Returns True on success, False if transition is blocked.
         """
+        self._ensure_active_session(["Manager"])
         conn = self._connect()
         try:
             with conn:
-                with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+                with conn.cursor(cursor_factory=self._dict_cursor_factory()) as cur:
                     # Lock the invoice row and check status
                     cur.execute(
                         "SELECT status, customer_number, total_amount FROM invoices WHERE invoice_id = %s FOR UPDATE",
@@ -384,12 +507,25 @@ class OrdersDB:
                     if inv_row["status"] != "active":
                         return False
 
+                    cur.execute(
+                        """
+                        SELECT current_balance
+                        FROM customers
+                        WHERE customer_number = %s
+                        FOR UPDATE
+                        """,
+                        (inv_row["customer_number"],),
+                    )
+                    cust_row = cur.fetchone()
+                    old_balance = cust_row["current_balance"] if cust_row else 0
+
                     # Fetch line items
                     cur.execute(
                         "SELECT part_number, quantity FROM invoice_lines WHERE invoice_id = %s",
                         (invoice_id,),
                     )
                     lines = cur.fetchall()
+                    stock_decrements = []
 
                     # Decrement stock for each line (PartService.update_stock equivalent)
                     for line in lines:
@@ -401,6 +537,12 @@ class OrdersDB:
                             """,
                             (line["quantity"], line["part_number"]),
                         )
+                        stock_decrements.append(
+                            {
+                                "part_number": line["part_number"],
+                                "quantity": line["quantity"],
+                            }
+                        )
 
                     # Update customer balance += invoice total
                     cur.execute(
@@ -411,11 +553,40 @@ class OrdersDB:
                         """,
                         (inv_row["total_amount"], inv_row["customer_number"]),
                     )
+                    new_balance_row = cur.fetchone()
 
                     # Advance invoice status to 'shipped'
                     cur.execute(
                         "UPDATE invoices SET status = 'shipped' WHERE invoice_id = %s",
                         (invoice_id,),
+                    )
+
+                    write_audit_log(
+                        conn,
+                        self._session_manager,
+                        "INVOICE_SHIPPED",
+                        "Invoices",
+                        invoice_id,
+                        {
+                            "status_change": "active -> shipped",
+                            "stock_decrements": stock_decrements,
+                        },
+                    )
+                    write_audit_log(
+                        conn,
+                        self._session_manager,
+                        "BALANCE_UPDATE",
+                        "Customers",
+                        inv_row["customer_number"],
+                        {
+                            "old_balance": old_balance,
+                            "new_balance": (
+                                new_balance_row[0] if new_balance_row else None
+                            ),
+                            "reason": "invoice shipment",
+                            "invoice_id": invoice_id,
+                            "invoice_total": inv_row["total_amount"],
+                        },
                     )
                     return True
         finally:
@@ -430,9 +601,13 @@ class OrdersDB:
         Returns True on success, False if the row was not found / transition blocked.
         """
         if new_status == "shipped":
+            self._ensure_active_session(["Manager"])
             return self.ship_invoice(invoice_id)
 
+        self._ensure_active_session(["Manager"])
         VALID = {"active": {"void"}, "shipped": {"paid"}}
+        if new_status not in {"void", "paid"}:
+            return False
         conn = self._connect()
         try:
             with conn:
@@ -457,10 +632,13 @@ class OrdersDB:
                             (invoice_id,),
                         )
 
-                    cur.execute(
-                        "UPDATE invoices SET status = %s WHERE invoice_id = %s",
-                        (new_status, invoice_id),
-                    )
+                    if self._invoice_service is not None:
+                        self._invoice_service.update_status(invoice_id, new_status)
+                    else:
+                        cur.execute(
+                            "UPDATE invoices SET status = %s WHERE invoice_id = %s",
+                            (new_status, invoice_id),
+                        )
                     return True
         finally:
             conn.close()
@@ -476,17 +654,22 @@ class KPIBar(ctk.CTkFrame):
         self._build()
 
     def _build(self):
-        totals  = sum(i["amount"] for i in self.invoices)
-        active  = sum(1 for i in self.invoices if i["status"] == "active")
+        totals = sum(i["amount"] for i in self.invoices)
+        active = sum(1 for i in self.invoices if i["status"] == "active")
         shipped = sum(1 for i in self.invoices if i["status"] == "shipped")
-        paid    = sum(1 for i in self.invoices if i["status"] == "paid")
+        paid = sum(1 for i in self.invoices if i["status"] == "paid")
 
         cards = [
-            ("Total Invoices",  str(len(self.invoices)), C["accent"],  "All records"),
-            ("Total Revenue",   fmt_currency(totals),    C["success"], "From listed invoices"),
-            ("Pending / Active", str(active),            C["warn"],    "Needs action"),
-            ("Shipped",         str(shipped),            C["shipped"], "Ready to collect"),
-            ("Paid",            str(paid),               C["paid"],    "Settled invoices"),
+            ("Total Invoices", str(len(self.invoices)), C["accent"], "All records"),
+            (
+                "Total Revenue",
+                fmt_currency(totals),
+                C["success"],
+                "From listed invoices",
+            ),
+            ("Pending / Active", str(active), C["warn"], "Needs action"),
+            ("Shipped", str(shipped), C["shipped"], "Ready to collect"),
+            ("Paid", str(paid), C["paid"], "Settled invoices"),
         ]
 
         container = ctk.CTkFrame(self, fg_color="transparent")
@@ -496,26 +679,39 @@ class KPIBar(ctk.CTkFrame):
 
         for idx, (title, val, clr, sub) in enumerate(cards):
             card = ctk.CTkFrame(
-                container, fg_color=C["panel"], corner_radius=12,
-                border_width=1, border_color=C["border"], height=108,
+                container,
+                fg_color=C["panel"],
+                corner_radius=12,
+                border_width=1,
+                border_color=C["border"],
+                height=108,
             )
-            card.grid(row=0, column=idx, sticky="nsew",
-                      padx=(0 if idx == 0 else 5), pady=0)
+            card.grid(
+                row=0, column=idx, sticky="nsew", padx=(0 if idx == 0 else 5), pady=0
+            )
             card.pack_propagate(False)
 
-            ctk.CTkLabel(card, text=title, font=("Segoe UI", 11, "bold"),
-                         text_color=C["text_muted"]).pack(anchor="w", padx=14, pady=(12, 0))
-            ctk.CTkLabel(card, text=val, font=("Segoe UI", 22, "bold"),
-                         text_color="#2c3e50").pack(anchor="w", padx=14, pady=(2, 0))
-            ctk.CTkLabel(card, text=sub, font=("Segoe UI", 10),
-                         text_color=clr).pack(anchor="w", padx=14, pady=(0, 12))
+            ctk.CTkLabel(
+                card,
+                text=title,
+                font=("Segoe UI", 11, "bold"),
+                text_color=C["text_muted"],
+            ).pack(anchor="w", padx=14, pady=(12, 0))
+            ctk.CTkLabel(
+                card, text=val, font=("Segoe UI", 22, "bold"), text_color="#2c3e50"
+            ).pack(anchor="w", padx=14, pady=(2, 0))
+            ctk.CTkLabel(card, text=sub, font=("Segoe UI", 10), text_color=clr).pack(
+                anchor="w", padx=14, pady=(0, 12)
+            )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  INVOICE DETAIL POPUP  (now loads live line-items from DB)
 # ══════════════════════════════════════════════════════════════════════════════
 class InvoiceDetailDialog(tk.Toplevel):
-    def __init__(self, master, invoice, role, on_status_change, db: "OrdersDB | None" = None):
+    def __init__(
+        self, master, invoice, role, on_status_change, db: "OrdersDB | None" = None
+    ):
         super().__init__(master)
         self.title(f"Invoice Details — {invoice['invoice_number']}")
         self.configure(bg=C["bg"])
@@ -528,9 +724,13 @@ class InvoiceDetailDialog(tk.Toplevel):
         hdr = tk.Frame(self, bg=C["accent"], height=56)
         hdr.pack(fill="x")
         hdr.pack_propagate(False)
-        tk.Label(hdr, text=f"Invoice  {inv['invoice_number']}",
-                 font=("Segoe UI", 14, "bold"), bg=C["accent"], fg="white"
-                 ).pack(side="left", padx=20, pady=14)
+        tk.Label(
+            hdr,
+            text=f"Invoice  {inv['invoice_number']}",
+            font=("Segoe UI", 14, "bold"),
+            bg=C["accent"],
+            fg="white",
+        ).pack(side="left", padx=20, pady=14)
         badge = status_badge(hdr, inv["status"], bg_override="white")
         badge.pack(side="right", padx=20, pady=14)
 
@@ -540,24 +740,65 @@ class InvoiceDetailDialog(tk.Toplevel):
         def field_row(label, value):
             r = tk.Frame(body, bg=C["bg"])
             r.pack(fill="x", pady=3)
-            tk.Label(r, text=label, width=16, anchor="w", font=FONT_BOLD,
-                     bg=C["bg"], fg=C["text_muted"]).pack(side="left")
-            tk.Label(r, text=value, anchor="w", font=FONT,
-                     bg=C["bg"], fg=C["text"]).pack(side="left")
+            tk.Label(
+                r,
+                text=label,
+                width=16,
+                anchor="w",
+                font=FONT_BOLD,
+                bg=C["bg"],
+                fg=C["text_muted"],
+            ).pack(side="left")
+            tk.Label(
+                r, text=value, anchor="w", font=FONT, bg=C["bg"], fg=C["text"]
+            ).pack(side="left")
 
-        field_row("Customer:",    inv.get("customer_name", "—"))
-        field_row("Company:",     inv.get("company_name", "—"))
-        field_row("Address:",     inv.get("customer_address", "—"))
-        field_row("Customer #:",  str(inv.get("customer_number", "—")))
+        # Header fields: match screenshot: Customer, Company, Address, Customer #
+        field_row("Customer:", inv.get("customer_name", "—"))
+        field_row("Company:", inv.get("company_name", "—"))
+
+        # Try to fetch address when DB is available and we have a customer_number
+        address = inv.get("address") or "—"
+        if self.db and inv.get("customer_number"):
+            try:
+                fetched = self.db.get_customer_address(inv["customer_number"])
+                if fetched:
+                    address = fetched
+            except Exception as exc:
+                print(f"[InvoiceDetailDialog] address fetch failed: {exc}")
+
+        field_row("Address:", address)
+        field_row("Customer #:", inv.get("customer_number", "—"))
         field_row("Date Written:", inv.get("date", "—"))
-        field_row("Sales Rep:",   inv.get("sales_rep", "—"))
-        field_row("Amount Due:",  fmt_currency(inv.get("amount", 0)))
+        field_row("Sales Rep:", inv.get("sales_rep", "—"))
+
+        # Amount Due: emphasize like the screenshot
+        r = tk.Frame(body, bg=C["bg"])
+        r.pack(fill="x", pady=3)
+        tk.Label(
+            r,
+            text="Amount Due:",
+            width=16,
+            anchor="w",
+            font=FONT_BOLD,
+            bg=C["bg"],
+            fg=C["text_muted"],
+        ).pack(side="left")
+        tk.Label(
+            r,
+            text=fmt_currency(inv.get("amount", 0)),
+            anchor="w",
+            font=("Segoe UI", 13, "bold"),
+            bg=C["bg"],
+            fg=C["accent"],
+        ).pack(side="left")
 
         tk.Frame(body, bg=C["border"], height=1).pack(fill="x", pady=10)
 
         # ── Line Items section ────────────────────────────────────────────────
-        tk.Label(body, text="Items", font=FONT_BOLD,
-                 bg=C["bg"], fg=C["text_muted"]).pack(anchor="w", pady=(0, 4))
+        tk.Label(
+            body, text="Items", font=FONT_BOLD, bg=C["bg"], fg=C["text_muted"]
+        ).pack(anchor="w", pady=(0, 4))
 
         lines_frame = tk.Frame(body, bg=C["bg"])
         lines_frame.pack(fill="x", pady=(0, 8))
@@ -567,35 +808,91 @@ class InvoiceDetailDialog(tk.Toplevel):
             try:
                 lines = self.db.fetch_invoice_lines(inv["invoice_id"])
             except Exception as exc:
-                tk.Label(lines_frame, text=f"Could not load line items: {exc}",
-                         font=FONT_SMALL, bg=C["bg"], fg=C["danger"]).pack(anchor="w")
+                tk.Label(
+                    lines_frame,
+                    text=f"Could not load line items: {exc}",
+                    font=FONT_SMALL,
+                    bg=C["bg"],
+                    fg=C["danger"],
+                ).pack(anchor="w")
 
             if lines:
                 hdr_row = tk.Frame(lines_frame, bg=C["hdr_bg"])
                 hdr_row.pack(fill="x")
-                for txt, w in [("Item", 22), ("Qty", 5), ("Unit Price", 10), ("Total", 10)]:
-                    tk.Label(hdr_row, text=txt, font=FONT_SMALL, bg=C["hdr_bg"],
-                             fg=C["text_muted"], width=w, anchor="w",
-                             padx=4, pady=3).pack(side="left")
+                for txt, w in [
+                    ("Item", 22),
+                    ("Qty", 5),
+                    ("Unit Price", 10),
+                    ("Total", 10),
+                ]:
+                    tk.Label(
+                        hdr_row,
+                        text=txt,
+                        font=FONT_SMALL,
+                        bg=C["hdr_bg"],
+                        fg=C["text_muted"],
+                        width=w,
+                        anchor="w",
+                        padx=4,
+                        pady=3,
+                    ).pack(side="left")
 
                 for i, line in enumerate(lines):
                     bg = C["row_alt"] if i % 2 else C["panel"]
                     lr = tk.Frame(lines_frame, bg=bg)
                     lr.pack(fill="x")
-                    tk.Label(lr, text=line["description"][:28], font=FONT_SMALL,
-                             bg=bg, fg=C["text"], width=22, anchor="w").pack(side="left", padx=4, pady=3)
-                    tk.Label(lr, text=str(line["quantity"]), font=FONT_SMALL,
-                             bg=bg, fg=C["text"], width=5, anchor="w").pack(side="left")
-                    tk.Label(lr, text=fmt_currency(line["unit_price"]), font=FONT_SMALL,
-                             bg=bg, fg=C["text"], width=10, anchor="w").pack(side="left")
-                    tk.Label(lr, text=fmt_currency(line["line_total"]), font=FONT_SMALL,
-                             bg=bg, fg=C["accent"], width=10, anchor="w").pack(side="left")
+                    tk.Label(
+                        lr,
+                        text=line["description"][:28],
+                        font=FONT_SMALL,
+                        bg=bg,
+                        fg=C["text"],
+                        width=22,
+                        anchor="w",
+                    ).pack(side="left", padx=4, pady=3)
+                    tk.Label(
+                        lr,
+                        text=str(line["quantity"]),
+                        font=FONT_SMALL,
+                        bg=bg,
+                        fg=C["text"],
+                        width=5,
+                        anchor="w",
+                    ).pack(side="left")
+                    tk.Label(
+                        lr,
+                        text=fmt_currency(line["unit_price"]),
+                        font=FONT_SMALL,
+                        bg=bg,
+                        fg=C["text"],
+                        width=10,
+                        anchor="w",
+                    ).pack(side="left")
+                    tk.Label(
+                        lr,
+                        text=fmt_currency(line["line_total"]),
+                        font=FONT_SMALL,
+                        bg=bg,
+                        fg=C["accent"],
+                        width=10,
+                        anchor="w",
+                    ).pack(side="left")
             elif not any(isinstance(c, tk.Label) for c in lines_frame.winfo_children()):
-                tk.Label(lines_frame, text="No line items on record.", font=FONT_SMALL,
-                         bg=C["bg"], fg=C["text_light"]).pack(anchor="w")
+                tk.Label(
+                    lines_frame,
+                    text="No line items on record.",
+                    font=FONT_SMALL,
+                    bg=C["bg"],
+                    fg=C["text_light"],
+                ).pack(anchor="w")
         else:
-            tk.Label(lines_frame, text="Line item detail unavailable (no DB connection).",
-                     font=FONT_SMALL, bg=C["bg"], fg=C["text_light"]).pack(anchor="w")
+            tk.Label(
+                lines_frame,
+                text="Line item detail unavailable (no DB connection).",
+                font=FONT_SMALL,
+                bg=C["bg"],
+                fg=C["text_light"],
+            ).pack(anchor="w")
 
         tk.Frame(body, bg=C["border"], height=1).pack(fill="x", pady=10)
 
@@ -621,36 +918,84 @@ class InvoiceDetailDialog(tk.Toplevel):
                 self.destroy()
 
         if status == "active":
-            tk.Label(action_frame, text="Status Actions:", font=FONT_BOLD,
-                     bg=C["bg"], fg=C["text_muted"]).pack(anchor="w", pady=(0, 6))
+            tk.Label(
+                action_frame,
+                text="Status Actions:",
+                font=FONT_BOLD,
+                bg=C["bg"],
+                fg=C["text_muted"],
+            ).pack(anchor="w", pady=(0, 6))
             btn_row = tk.Frame(action_frame, bg=C["bg"])
             btn_row.pack(anchor="w")
-            tk.Button(btn_row, text="✓  Mark Shipped", bg=C["shipped"], fg="white",
-                      font=("Segoe UI", 10, "bold"), relief="flat", bd=0,
-                      padx=12, pady=6, cursor="hand2", command=do_ship,
-                      ).pack(side="left", padx=(0, 8))
-            tk.Button(btn_row, text="✕  Void", bg=C["danger"], fg="white",
-                      font=("Segoe UI", 10, "bold"), relief="flat", bd=0,
-                      padx=12, pady=6, cursor="hand2", command=do_void,
-                      ).pack(side="left")
+            tk.Button(
+                btn_row,
+                text="✓  Mark Shipped",
+                bg=C["shipped"],
+                fg="white",
+                font=("Segoe UI", 10, "bold"),
+                relief="flat",
+                bd=0,
+                padx=12,
+                pady=6,
+                cursor="hand2",
+                command=do_ship,
+            ).pack(side="left", padx=(0, 8))
+            tk.Button(
+                btn_row,
+                text="✕  Void",
+                bg=C["danger"],
+                fg="white",
+                font=("Segoe UI", 10, "bold"),
+                relief="flat",
+                bd=0,
+                padx=12,
+                pady=6,
+                cursor="hand2",
+                command=do_void,
+            ).pack(side="left")
 
         elif status == "shipped":
-            tk.Label(action_frame, text="Status Actions:", font=FONT_BOLD,
-                     bg=C["bg"], fg=C["text_muted"]).pack(anchor="w", pady=(0, 6))
-            tk.Button(action_frame, text="💳  Mark Paid", bg=C["paid"], fg="white",
-                      font=("Segoe UI", 10, "bold"), relief="flat", bd=0,
-                      padx=12, pady=6, cursor="hand2", command=do_paid,
-                      ).pack(anchor="w")
+            tk.Label(
+                action_frame,
+                text="Status Actions:",
+                font=FONT_BOLD,
+                bg=C["bg"],
+                fg=C["text_muted"],
+            ).pack(anchor="w", pady=(0, 6))
+            tk.Button(
+                action_frame,
+                text="💳  Mark Paid",
+                bg=C["paid"],
+                fg="white",
+                font=("Segoe UI", 10, "bold"),
+                relief="flat",
+                bd=0,
+                padx=12,
+                pady=6,
+                cursor="hand2",
+                command=do_paid,
+            ).pack(anchor="w")
 
         elif status in ("paid", "void"):
-            tk.Label(action_frame,
-                     text="🔒  This invoice is fully locked (no further actions).",
-                     font=FONT_SMALL, bg=C["bg"], fg=C["text_muted"]).pack(anchor="w")
+            tk.Label(
+                action_frame,
+                text="🔒  This invoice is fully locked (no further actions).",
+                font=FONT_SMALL,
+                bg=C["bg"],
+                fg=C["text_muted"],
+            ).pack(anchor="w")
 
         tk.Frame(body, bg=C["border"], height=1).pack(fill="x", pady=10)
-        ctk.CTkButton(body, text="Close", width=100, height=32,
-                      fg_color=C["border"], text_color=C["text"],
-                      hover_color="#cbd5e1", command=self.destroy).pack(anchor="e")
+        ctk.CTkButton(
+            body,
+            text="Close",
+            width=100,
+            height=32,
+            fg_color=C["border"],
+            text_color=C["text"],
+            hover_color="#cbd5e1",
+            command=self.destroy,
+        ).pack(anchor="e")
 
         self.update_idletasks()
         w, h = 520, self.winfo_reqheight()
@@ -665,8 +1010,14 @@ class InvoiceDetailDialog(tk.Toplevel):
 class ManageInvoicesPanel(ctk.CTkFrame):
 
     def __init__(self, master, invoices, role, on_status_change, db=None, **kw):
-        super().__init__(master, fg_color=C["panel"], corner_radius=12,
-                         border_width=1, border_color=C["border"], **kw)
+        super().__init__(
+            master,
+            fg_color=C["panel"],
+            corner_radius=12,
+            border_width=1,
+            border_color=C["border"],
+            **kw,
+        )
         self.invoices = list(invoices)
         self.filtered = list(invoices)
         self.role = role
@@ -679,8 +1030,13 @@ class ManageInvoicesPanel(ctk.CTkFrame):
         toolbar = tk.Frame(self, bg=C["panel"])
         toolbar.pack(fill="x", padx=16, pady=(14, 8))
 
-        tk.Label(toolbar, text="Manage Invoices", font=("Segoe UI", 13, "bold"),
-                 bg=C["panel"], fg=C["text"]).pack(side="left")
+        tk.Label(
+            toolbar,
+            text="Manage Invoices",
+            font=("Segoe UI", 13, "bold"),
+            bg=C["panel"],
+            fg=C["text"],
+        ).pack(side="left")
 
         # Filter dropdown
         self.filter_var = tk.StringVar(value="All Status")
@@ -688,57 +1044,97 @@ class ManageInvoicesPanel(ctk.CTkFrame):
             toolbar,
             variable=self.filter_var,
             values=["All Status", "active", "shipped", "paid", "void"],
-            fg_color=C["input_bg"], button_color=C["accent"],
-            text_color=C["text"], width=120, height=28,
+            fg_color=C["input_bg"],
+            button_color=C["accent"],
+            text_color=C["text"],
+            width=120,
+            height=28,
             command=self._apply_filter,
         ).pack(side="right", padx=(6, 0))
 
         # Refresh button (to the left of search)
         tk.Button(
-            toolbar, text="↻", bg=C["panel"], fg=C["accent"],
-            font=("Segoe UI", 12, "bold"), relief="flat", bd=0,
-            padx=6, pady=2, cursor="hand2",
+            toolbar,
+            text="↻",
+            bg=C["panel"],
+            fg=C["accent"],
+            font=("Segoe UI", 12, "bold"),
+            relief="flat",
+            bd=0,
+            padx=6,
+            pady=2,
+            cursor="hand2",
             command=self._refresh,
         ).pack(side="right", padx=(0, 4))
 
         # Search box
         self.search_var = tk.StringVar()
         self.search_var.trace_add("write", lambda *_: self._apply_filter())
-        sb = tk.Frame(toolbar, bg=C["input_bg"],
-                      highlightthickness=1, highlightbackground=C["input_bdr"])
+        sb = tk.Frame(
+            toolbar,
+            bg=C["input_bg"],
+            highlightthickness=1,
+            highlightbackground=C["input_bdr"],
+        )
         sb.pack(side="right", padx=(0, 4))
-        tk.Label(sb, text="🔍", bg=C["input_bg"], font=("Segoe UI", 9)).pack(side="left", padx=(6, 0))
-        tk.Entry(sb, textvariable=self.search_var, font=FONT, relief="flat",
-                 width=16, bg=C["input_bg"], fg=C["text"],
-                 insertbackground=C["text"]).pack(side="left", padx=4, pady=3)
+        tk.Label(sb, text="🔍", bg=C["input_bg"], font=("Segoe UI", 9)).pack(
+            side="left", padx=(6, 0)
+        )
+        tk.Entry(
+            sb,
+            textvariable=self.search_var,
+            font=FONT,
+            relief="flat",
+            width=16,
+            bg=C["input_bg"],
+            fg=C["text"],
+            insertbackground=C["text"],
+        ).pack(side="left", padx=4, pady=3)
 
         # ── Column definitions (shared by header + every row) ─────────────────
         # (label, pixel_width, anchor)
-        self.COLS = [
-            ("Invoice #",     100, "w"),
-            ("Company",       150, "w"),
-            ("Contact",       160, "w"),
-            ("Amount",        110, "e"),
-            ("Status",        90,  "center"),
-            ("Date",          100, "w"),
-            ("Actions",       0,   "w"),   # 0 = fill remaining space
+        self.COLS: list[tuple[str, int, Literal["w", "e", "center"]]] = [
+            ("Invoice #", 100, "w"),
+            ("Company", 150, "w"),
+            ("Contact", 160, "w"),
+            ("Amount", 110, "e"),
+            ("Status", 90, "center"),
+            ("Date", 100, "w"),
+            ("Actions", 0, "w"),  # 0 = fill remaining space
         ]
 
         # ── Column headers ────────────────────────────────────────────────────
-        hdr = tk.Frame(self, bg=C["hdr_bg"],
-                       highlightthickness=1, highlightbackground=C["border"])
+        hdr = tk.Frame(
+            self, bg=C["hdr_bg"], highlightthickness=1, highlightbackground=C["border"]
+        )
         hdr.pack(fill="x", padx=16, pady=(0, 0))
 
         for col_idx, (txt, px, anc) in enumerate(self.COLS):
             if px:
-                lbl = tk.Label(hdr, text=txt, font=FONT_BOLD, bg=C["hdr_bg"],
-                               fg=C["text_muted"], anchor=anc, padx=8, pady=7,
-                               width=1)          # width=1 + fixed frame below
+                lbl = tk.Label(
+                    hdr,
+                    text=txt,
+                    font=FONT_BOLD,
+                    bg=C["hdr_bg"],
+                    fg=C["text_muted"],
+                    anchor=anc,
+                    padx=8,
+                    pady=7,
+                    width=1,
+                )  # width=1 + fixed frame below
                 lbl.grid(row=0, column=col_idx, sticky="nsew", ipadx=0)
                 hdr.grid_columnconfigure(col_idx, minsize=px, weight=0)
             else:
-                lbl = tk.Label(hdr, text=txt, font=FONT_BOLD, bg=C["hdr_bg"],
-                               fg=C["text_muted"], anchor="w", padx=8, pady=7)
+                lbl = tk.Label(
+                    hdr,
+                    text=txt,
+                    font=FONT_BOLD,
+                    bg=C["hdr_bg"],
+                    fg=C["text_muted"],
+                    anchor="w",
+                    padx=8,
+                    pady=7,
+                )
                 lbl.grid(row=0, column=col_idx, sticky="nsew")
                 hdr.grid_columnconfigure(col_idx, weight=1)
 
@@ -751,7 +1147,8 @@ class ManageInvoicesPanel(ctk.CTkFrame):
         q = self.search_var.get().lower()
         status = self.filter_var.get()
         self.filtered = [
-            inv for inv in self.invoices
+            inv
+            for inv in self.invoices
             if (status == "All Status" or inv["status"].lower() == status)
             and (
                 q in inv["invoice_number"].lower()
@@ -766,8 +1163,13 @@ class ManageInvoicesPanel(ctk.CTkFrame):
             w.destroy()
 
         if not self.filtered:
-            tk.Label(self.rows_frame, text="No invoices found.", font=FONT,
-                     bg=C["panel"], fg=C["text_muted"]).pack(pady=30)
+            tk.Label(
+                self.rows_frame,
+                text="No invoices found.",
+                font=FONT,
+                bg=C["panel"],
+                fg=C["text_muted"],
+            ).pack(pady=30)
             return
 
         for i, inv in enumerate(self.filtered):
@@ -785,8 +1187,12 @@ class ManageInvoicesPanel(ctk.CTkFrame):
                 else:
                     row.grid_columnconfigure(col_idx, weight=1)
 
-            def _enter(e, r=row, b=bg): r.configure(bg=C["row_hover"])
-            def _leave(e, r=row, b=bg): r.configure(bg=b)
+            def _enter(e, r=row, b=bg):
+                r.configure(bg=C["row_hover"])
+
+            def _leave(e, r=row, b=bg):
+                r.configure(bg=b)
+
             row.bind("<Enter>", _enter)
             row.bind("<Leave>", _leave)
 
@@ -794,39 +1200,69 @@ class ManageInvoicesPanel(ctk.CTkFrame):
             PAD = {"padx": 8, "pady": 8, "sticky": "nsew"}
 
             # Col 0 — Invoice #
-            tk.Label(row, text=inv["invoice_number"], font=FONT_MONO,
-                     bg=bg, fg=C["accent"], anchor="w"
-                     ).grid(row=0, column=0, **PAD)
+            tk.Label(
+                row,
+                text=inv["invoice_number"],
+                font=FONT_MONO,
+                bg=bg,
+                fg=C["accent"],
+                anchor="w",
+            ).grid(row=0, column=0, **PAD)
 
             # Col 1 — Company
-            tk.Label(row, text=inv.get("company_name", "—"), font=FONT,
-                     bg=bg, fg=C["text"], anchor="w"
-                     ).grid(row=0, column=1, **PAD)
+            tk.Label(
+                row,
+                text=inv.get("company_name", "—"),
+                font=FONT,
+                bg=bg,
+                fg=C["text"],
+                anchor="w",
+            ).grid(row=0, column=1, **PAD)
 
             # Col 2 — Contact
-            tk.Label(row, text=inv.get("customer_name", "—"), font=FONT,
-                     bg=bg, fg=C["text_muted"], anchor="w"
-                     ).grid(row=0, column=2, **PAD)
+            tk.Label(
+                row,
+                text=inv.get("customer_name", "—"),
+                font=FONT,
+                bg=bg,
+                fg=C["text_muted"],
+                anchor="w",
+            ).grid(row=0, column=2, **PAD)
 
             # Col 3 — Amount (right-aligned)
-            tk.Label(row, text=fmt_currency(inv["amount"]), font=FONT,
-                     bg=bg, fg=C["text"], anchor="e"
-                     ).grid(row=0, column=3, padx=8, pady=8, sticky="nse")
+            tk.Label(
+                row,
+                text=fmt_currency(inv["amount"]),
+                font=FONT,
+                bg=bg,
+                fg=C["text"],
+                anchor="e",
+            ).grid(row=0, column=3, padx=8, pady=8, sticky="nse")
 
             # Col 4 — Status badge (centered)
             cfg = STATUS_CFG.get(inv["status"].lower(), STATUS_CFG["active"])
             badge_wrap = tk.Frame(row, bg=bg)
             badge_wrap.grid(row=0, column=4, padx=6, pady=6, sticky="nsew")
-            tk.Label(badge_wrap, text=cfg["label"],
-                     bg=cfg["bg"], fg=cfg["fg"],
-                     font=("Segoe UI", 8, "bold"),
-                     padx=10, pady=3, relief="flat"
-                     ).pack(expand=True)
+            tk.Label(
+                badge_wrap,
+                text=cfg["label"],
+                bg=cfg["bg"],
+                fg=cfg["fg"],
+                font=("Segoe UI", 8, "bold"),
+                padx=10,
+                pady=3,
+                relief="flat",
+            ).pack(expand=True)
 
             # Col 5 — Date
-            tk.Label(row, text=inv.get("date", ""), font=FONT_SMALL,
-                     bg=bg, fg=C["text_muted"], anchor="w"
-                     ).grid(row=0, column=5, **PAD)
+            tk.Label(
+                row,
+                text=inv.get("date", ""),
+                font=FONT_SMALL,
+                bg=bg,
+                fg=C["text_muted"],
+                anchor="w",
+            ).grid(row=0, column=5, **PAD)
 
             # Col 6 — Actions
             act = tk.Frame(row, bg=bg)
@@ -834,33 +1270,67 @@ class ManageInvoicesPanel(ctk.CTkFrame):
 
             s = inv["status"].lower()
 
-            tk.Button(act, text="View Details", bg=C["accent"], fg="white",
-                      font=("Segoe UI", 8, "bold"), relief="flat", bd=0,
-                      padx=8, pady=4, cursor="hand2",
-                      command=lambda iv=inv_ref: self._open_detail(iv),
-                      ).pack(side="left", padx=(0, 4))
+            tk.Button(
+                act,
+                text="View Details",
+                bg=C["accent"],
+                fg="white",
+                font=("Segoe UI", 8, "bold"),
+                relief="flat",
+                bd=0,
+                padx=8,
+                pady=4,
+                cursor="hand2",
+                command=lambda iv=inv_ref: self._open_detail(iv),
+            ).pack(side="left", padx=(0, 4))
 
             if s == "active":
-                tk.Button(act, text="Mark Shipped", bg=C["shipped"], fg="white",
-                          font=("Segoe UI", 8, "bold"), relief="flat", bd=0,
-                          padx=8, pady=4, cursor="hand2",
-                          command=lambda iv=inv_ref: self._quick_action(iv, "shipped"),
-                          ).pack(side="left", padx=(0, 4))
-                tk.Button(act, text="Void", bg=C["danger"], fg="white",
-                          font=("Segoe UI", 8, "bold"), relief="flat", bd=0,
-                          padx=8, pady=4, cursor="hand2",
-                          command=lambda iv=inv_ref: self._quick_action(iv, "void"),
-                          ).pack(side="left")
+                tk.Button(
+                    act,
+                    text="Mark Shipped",
+                    bg=C["shipped"],
+                    fg="white",
+                    font=("Segoe UI", 8, "bold"),
+                    relief="flat",
+                    bd=0,
+                    padx=8,
+                    pady=4,
+                    cursor="hand2",
+                    command=lambda iv=inv_ref: self._quick_action(iv, "shipped"),
+                ).pack(side="left", padx=(0, 4))
+                tk.Button(
+                    act,
+                    text="Void",
+                    bg=C["danger"],
+                    fg="white",
+                    font=("Segoe UI", 8, "bold"),
+                    relief="flat",
+                    bd=0,
+                    padx=8,
+                    pady=4,
+                    cursor="hand2",
+                    command=lambda iv=inv_ref: self._quick_action(iv, "void"),
+                ).pack(side="left")
             elif s == "shipped":
-                tk.Button(act, text="Mark Paid", bg=C["paid"], fg="white",
-                          font=("Segoe UI", 8, "bold"), relief="flat", bd=0,
-                          padx=8, pady=4, cursor="hand2",
-                          command=lambda iv=inv_ref: self._quick_action(iv, "paid"),
-                          ).pack(side="left")
+                tk.Button(
+                    act,
+                    text="Mark Paid",
+                    bg=C["paid"],
+                    fg="white",
+                    font=("Segoe UI", 8, "bold"),
+                    relief="flat",
+                    bd=0,
+                    padx=8,
+                    pady=4,
+                    cursor="hand2",
+                    command=lambda iv=inv_ref: self._quick_action(iv, "paid"),
+                ).pack(side="left")
 
     def _open_detail(self, inv):
         InvoiceDetailDialog(
-            self.winfo_toplevel(), inv, self.role,
+            self.winfo_toplevel(),
+            inv,
+            self.role,
             on_status_change=lambda iid, inum, st: self._update_status(iid, inum, st),
             db=self.db,
         )
@@ -907,6 +1377,7 @@ class ManageInvoicesPanel(ctk.CTkFrame):
                 self.invoices = self.db.fetch_invoices()
             except Exception as exc:
                 from tkinter import messagebox as _mb
+
                 _mb.showerror("Refresh Error", str(exc))
                 return
         self._apply_filter()
@@ -917,8 +1388,14 @@ class ManageInvoicesPanel(ctk.CTkFrame):
 # ══════════════════════════════════════════════════════════════════════════════
 class CreateInvoicePanel(ctk.CTkFrame):
     def __init__(self, master, customers, parts, role, on_create, db=None, **kw):
-        super().__init__(master, fg_color=C["panel"], corner_radius=12,
-                         border_width=1, border_color=C["border"], **kw)
+        super().__init__(
+            master,
+            fg_color=C["panel"],
+            corner_radius=12,
+            border_width=1,
+            border_color=C["border"],
+            **kw,
+        )
         # customers is list[dict] with keys: customer_number, company_name
         self.customers_raw = customers
         self.customers = [c["company_name"] for c in customers]
@@ -934,38 +1411,60 @@ class CreateInvoicePanel(ctk.CTkFrame):
     def _build(self):
         hdr = tk.Frame(self, bg=C["panel"])
         hdr.pack(fill="x", padx=20, pady=(16, 8))
-        tk.Label(hdr, text="Create Invoice", font=("Segoe UI", 13, "bold"),
-                 bg=C["panel"], fg=C["text"]).pack(side="left")
+        tk.Label(
+            hdr,
+            text="Create Invoice",
+            font=("Segoe UI", 13, "bold"),
+            bg=C["panel"],
+            fg=C["text"],
+        ).pack(side="left")
 
         body = tk.Frame(self, bg=C["panel"])
         body.pack(fill="both", expand=True, padx=16, pady=(0, 8))
 
         def section(parent, text):
-            tk.Label(parent, text=text, font=FONT_BOLD,
-                     bg=C["panel"], fg=C["text_muted"]).pack(anchor="w", pady=(10, 2))
+            tk.Label(
+                parent, text=text, font=FONT_BOLD, bg=C["panel"], fg=C["text_muted"]
+            ).pack(anchor="w", pady=(10, 2))
 
         # ── Select Company (dropdown — filters contacts below) ───────────────
         section(body, "Select Company")
-        company_names = sorted(set(c["company_name"] for c in self.customers_raw)) if self.customers_raw else ["(No companies)"]
+        company_names = (
+            sorted(set(c["company_name"] for c in self.customers_raw))
+            if self.customers_raw
+            else ["(No companies)"]
+        )
         self.company_var = tk.StringVar(value="Select Company…")
         self.company_menu = ctk.CTkOptionMenu(
-            body, variable=self.company_var,
+            body,
+            variable=self.company_var,
             values=company_names,
-            fg_color=C["input_bg"], button_color=C["accent"],
-            text_color=C["text"], width=270, height=32,
+            fg_color=C["input_bg"],
+            button_color=C["accent"],
+            text_color=C["text"],
+            width=270,
+            height=32,
             command=self._on_company_selected,
         )
         self.company_menu.pack(anchor="w", pady=(0, 6))
 
         # ── Select Contact (filters based on company, or shows all) ──────────
         section(body, "Select Contact")
-        cust_display_names = [c["customer_name"] for c in self.customers_raw] if self.customers_raw else ["(No contacts)"]
+        cust_display_names = (
+            [c["customer_name"] for c in self.customers_raw]
+            if self.customers_raw
+            else ["(No contacts)"]
+        )
         self.cust_var = tk.StringVar(value="Select Contact…")
         self.contact_menu = ctk.CTkOptionMenu(
-            body, variable=self.cust_var,
+            body,
+            variable=self.cust_var,
             values=cust_display_names,
-            fg_color=C["input_bg"], button_color=C["accent"],
-            text_color=C["text"], width=270, height=32,
+            fg_color=C["input_bg"],
+            button_color=C["accent"],
+            text_color=C["text"],
+            width=270,
+            height=32,
             command=self._on_contact_selected,
         )
         self.contact_menu.pack(anchor="w", pady=(0, 6))
@@ -975,10 +1474,14 @@ class CreateInvoicePanel(ctk.CTkFrame):
         part_names = [p["description"] for p in self.parts]
         self.part_var = tk.StringVar(value="Select Item…")
         ctk.CTkOptionMenu(
-            body, variable=self.part_var,
+            body,
+            variable=self.part_var,
             values=part_names if part_names else ["(No parts)"],
-            fg_color=C["input_bg"], button_color=C["accent"],
-            text_color=C["text"], width=270, height=32,
+            fg_color=C["input_bg"],
+            button_color=C["accent"],
+            text_color=C["text"],
+            width=270,
+            height=32,
             command=self._on_part_selected,
         ).pack(anchor="w", pady=(0, 4))
 
@@ -987,41 +1490,70 @@ class CreateInvoicePanel(ctk.CTkFrame):
         qty_row = tk.Frame(body, bg=C["panel"])
         qty_row.pack(anchor="w", pady=(0, 2))
 
-        self.qty_frame = tk.Frame(qty_row, bg=C["panel"],
-                                  highlightthickness=1, highlightbackground=C["input_bdr"])
+        self.qty_frame = tk.Frame(
+            qty_row,
+            bg=C["panel"],
+            highlightthickness=1,
+            highlightbackground=C["input_bdr"],
+        )
         self.qty_frame.pack(side="left")
-        self.qty_entry = tk.Entry(self.qty_frame, width=6, font=FONT, relief="flat",
-                                  bg=C["input_bg"], fg=C["text"], insertbackground=C["text"])
+        self.qty_entry = tk.Entry(
+            self.qty_frame,
+            width=6,
+            font=FONT,
+            relief="flat",
+            bg=C["input_bg"],
+            fg=C["text"],
+            insertbackground=C["text"],
+        )
         self.qty_entry.insert(0, "1")
         self.qty_entry.pack(padx=8, pady=5)
         self.qty_entry.bind("<KeyRelease>", self._validate_qty)
 
         self.override_btn = tk.Button(
-            qty_row, text="⚡ Manager Override", bg=C["override"], fg="white",
-            font=("Segoe UI", 8, "bold"), relief="flat", bd=0,
-            padx=10, pady=5, cursor="hand2", command=self._activate_override,
+            qty_row,
+            text="⚡ Manager Override",
+            bg=C["override"],
+            fg="white",
+            font=("Segoe UI", 8, "bold"),
+            relief="flat",
+            bd=0,
+            padx=10,
+            pady=5,
+            cursor="hand2",
+            command=self._activate_override,
         )
         if self.role == "Manager":
             self.override_btn.pack(side="left", padx=(8, 0))
 
-        self.warn_lbl = tk.Label(body, text="", fg=C["danger"], bg=C["panel"],
-                                 font=("Segoe UI", 8, "bold"))
+        self.warn_lbl = tk.Label(
+            body, text="", fg=C["danger"], bg=C["panel"], font=("Segoe UI", 8, "bold")
+        )
         self.warn_lbl.pack(anchor="w")
 
-        self.stock_lbl = tk.Label(body, text="", fg=C["text_muted"], bg=C["panel"],
-                                  font=FONT_SMALL)
+        self.stock_lbl = tk.Label(
+            body, text="", fg=C["text_muted"], bg=C["panel"], font=FONT_SMALL
+        )
         self.stock_lbl.pack(anchor="w", pady=(0, 4))
 
         # ── Price per Unit ────────────────────────────────────────────────────
         section(body, "Price per Unit")
-        self.price_lbl = tk.Label(body, text="—", font=FONT, bg=C["panel"], fg=C["text"])
+        self.price_lbl = tk.Label(
+            body, text="—", font=FONT, bg=C["panel"], fg=C["text"]
+        )
         self.price_lbl.pack(anchor="w", pady=(0, 4))
 
         # ── Add Line Item ─────────────────────────────────────────────────────
-        ctk.CTkButton(body, text="+ Add Line Item", fg_color=C["border"],
-                      text_color=C["text"], hover_color="#cbd5e1",
-                      height=30, width=270, command=self._add_line_item,
-                      ).pack(anchor="w", pady=(4, 8))
+        ctk.CTkButton(
+            body,
+            text="+ Add Line Item",
+            fg_color=C["border"],
+            text_color=C["text"],
+            hover_color="#cbd5e1",
+            height=30,
+            width=270,
+            command=self._add_line_item,
+        ).pack(anchor="w", pady=(4, 8))
 
         # ── Items in this Invoice ─────────────────────────────────────────────
         section(body, "Items in this Invoice")
@@ -1033,16 +1565,29 @@ class CreateInvoicePanel(ctk.CTkFrame):
         tk.Frame(body, bg=C["border"], height=1).pack(fill="x", pady=6)
         total_row = tk.Frame(body, bg=C["panel"])
         total_row.pack(fill="x")
-        tk.Label(total_row, text="Total", font=FONT_BOLD, bg=C["panel"], fg=C["text"]).pack(side="left")
-        self.total_lbl = tk.Label(total_row, text="₱0.00", font=("Segoe UI", 13, "bold"),
-                                  bg=C["panel"], fg=C["accent"])
+        tk.Label(
+            total_row, text="Total", font=FONT_BOLD, bg=C["panel"], fg=C["text"]
+        ).pack(side="left")
+        self.total_lbl = tk.Label(
+            total_row,
+            text="₱0.00",
+            font=("Segoe UI", 13, "bold"),
+            bg=C["panel"],
+            fg=C["accent"],
+        )
         self.total_lbl.pack(side="right")
 
         # ── Save Invoice ──────────────────────────────────────────────────────
-        ctk.CTkButton(body, text="Save Invoice", fg_color=C["accent"],
-                      hover_color=C["accent_h"], height=36, width=270,
-                      font=ctk.CTkFont("Segoe UI", 11, "bold"), command=self._submit,
-                      ).pack(anchor="w", pady=(10, 4))
+        ctk.CTkButton(
+            body,
+            text="Save Invoice",
+            fg_color=C["accent"],
+            hover_color=C["accent_h"],
+            height=36,
+            width=270,
+            font=ctk.CTkFont("Segoe UI", 11, "bold"),
+            command=self._submit,
+        ).pack(anchor="w", pady=(10, 4))
 
     # ── helpers ───────────────────────────────────────────────────────────────
     def _get_selected_part(self):
@@ -1063,7 +1608,8 @@ class CreateInvoicePanel(ctk.CTkFrame):
         """When company is chosen, filter the contact dropdown to that company's contacts."""
         company = company_name or self.company_var.get()
         contacts = [
-            c["customer_name"] for c in self.customers_raw
+            c["customer_name"]
+            for c in self.customers_raw
             if c["company_name"] == company
         ]
         if not contacts:
@@ -1078,7 +1624,8 @@ class CreateInvoicePanel(ctk.CTkFrame):
             self.company_var.set(c["company_name"])
             # Re-filter contact list to this company's contacts
             contacts = [
-                x["customer_name"] for x in self.customers_raw
+                x["customer_name"]
+                for x in self.customers_raw
                 if x["company_name"] == c["company_name"]
             ]
             self.contact_menu.configure(values=contacts)
@@ -1146,13 +1693,15 @@ class CreateInvoicePanel(ctk.CTkFrame):
             return
 
         line_total = qty * float(p["selling_price"])
-        self.line_items.append({
-            "part_number": p["part_number"],
-            "description": p["description"],
-            "quantity": qty,
-            "unit_price": float(p["selling_price"]),
-            "line_total": line_total,
-        })
+        self.line_items.append(
+            {
+                "part_number": p["part_number"],
+                "description": p["description"],
+                "quantity": qty,
+                "unit_price": float(p["selling_price"]),
+                "line_total": line_total,
+            }
+        )
         self._refresh_items_list()
         self._update_total()
         self.part_var.set("Select Item…")
@@ -1168,33 +1717,80 @@ class CreateInvoicePanel(ctk.CTkFrame):
         for w in self.items_frame.winfo_children():
             w.destroy()
         if not self.line_items:
-            tk.Label(self.items_frame, text="No items added yet.", font=FONT_SMALL,
-                     bg=C["panel"], fg=C["text_light"]).pack(anchor="w")
+            tk.Label(
+                self.items_frame,
+                text="No items added yet.",
+                font=FONT_SMALL,
+                bg=C["panel"],
+                fg=C["text_light"],
+            ).pack(anchor="w")
             return
 
         hdr = tk.Frame(self.items_frame, bg=C["hdr_bg"])
         hdr.pack(fill="x")
         for txt, w in [("Item", 14), ("Qty", 4), ("Unit", 7), ("Total", 8), ("", 2)]:
-            tk.Label(hdr, text=txt, font=FONT_SMALL, bg=C["hdr_bg"],
-                     fg=C["text_muted"], width=w, anchor="w").pack(side="left", padx=4, pady=2)
+            tk.Label(
+                hdr,
+                text=txt,
+                font=FONT_SMALL,
+                bg=C["hdr_bg"],
+                fg=C["text_muted"],
+                width=w,
+                anchor="w",
+            ).pack(side="left", padx=4, pady=2)
 
         for i, item in enumerate(self.line_items):
             bg = C["row_alt"] if i % 2 else C["panel"]
             row = tk.Frame(self.items_frame, bg=bg)
             row.pack(fill="x")
-            tk.Label(row, text=item["description"][:18], font=FONT_SMALL,
-                     bg=bg, fg=C["text"], width=14, anchor="w").pack(side="left", padx=4, pady=3)
-            tk.Label(row, text=str(item["quantity"]), font=FONT_SMALL,
-                     bg=bg, fg=C["text"], width=4, anchor="w").pack(side="left")
-            tk.Label(row, text=fmt_currency(item["unit_price"]), font=FONT_SMALL,
-                     bg=bg, fg=C["text"], width=7, anchor="w").pack(side="left")
-            tk.Label(row, text=fmt_currency(item["line_total"]), font=FONT_SMALL,
-                     bg=bg, fg=C["text"], width=8, anchor="w").pack(side="left")
+            tk.Label(
+                row,
+                text=item["description"][:18],
+                font=FONT_SMALL,
+                bg=bg,
+                fg=C["text"],
+                width=14,
+                anchor="w",
+            ).pack(side="left", padx=4, pady=3)
+            tk.Label(
+                row,
+                text=str(item["quantity"]),
+                font=FONT_SMALL,
+                bg=bg,
+                fg=C["text"],
+                width=4,
+                anchor="w",
+            ).pack(side="left")
+            tk.Label(
+                row,
+                text=fmt_currency(item["unit_price"]),
+                font=FONT_SMALL,
+                bg=bg,
+                fg=C["text"],
+                width=7,
+                anchor="w",
+            ).pack(side="left")
+            tk.Label(
+                row,
+                text=fmt_currency(item["line_total"]),
+                font=FONT_SMALL,
+                bg=bg,
+                fg=C["text"],
+                width=8,
+                anchor="w",
+            ).pack(side="left")
             idx = i
-            tk.Button(row, text="✕", bg=bg, fg=C["danger"],
-                      font=("Segoe UI", 8, "bold"), relief="flat", bd=0,
-                      cursor="hand2", command=lambda ii=idx: self._remove_item(ii),
-                      ).pack(side="left")
+            tk.Button(
+                row,
+                text="✕",
+                bg=bg,
+                fg=C["danger"],
+                font=("Segoe UI", 8, "bold"),
+                relief="flat",
+                bd=0,
+                cursor="hand2",
+                command=lambda ii=idx: self._remove_item(ii),
+            ).pack(side="left")
 
     def _remove_item(self, idx):
         if 0 <= idx < len(self.line_items):
@@ -1226,18 +1822,20 @@ class CreateInvoicePanel(ctk.CTkFrame):
                 return
 
         # Recalculate total client-side (SUM qty * selling_price per line)
-        total = round(sum(
-            item["quantity"] * item["unit_price"] for item in self.line_items
-        ), 2)
+        total = round(
+            sum(item["quantity"] * item["unit_price"] for item in self.line_items), 2
+        )
 
-        self.on_create({
-            "customer_number":  cust["customer_number"],
-            "customer_name":    cust["customer_name"],
-            "company_name":     cust["company_name"],
-            "items":            self.line_items,
-            "total":            total,
-            "manager_override": self._override_active,
-        })
+        self.on_create(
+            {
+                "customer_number": cust["customer_number"],
+                "customer_name": cust["customer_name"],
+                "company_name": cust["company_name"],
+                "items": self.line_items,
+                "total": total,
+                "manager_override": self._override_active,
+            }
+        )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1250,7 +1848,9 @@ class OrdersView(ctk.CTkFrame):
         super().__init__(master, fg_color=C["bg"], **kw)
         self.controller = controller
         self.db_config = db_config
-        self.role = getattr(controller, "session", None) and controller.session.role or role
+        self.role = (
+            getattr(controller, "session", None) and controller.session.role or role
+        )
 
         self.invoices: list[dict] = []
         self.customers_raw: list[dict] = []
@@ -1260,7 +1860,9 @@ class OrdersView(ctk.CTkFrame):
         self.db: "OrdersDB | None" = None
         if HAS_DB and db_config:
             try:
-                self.db = OrdersDB(db_config)
+                self.db = OrdersDB(
+                    db_config, getattr(controller, "session_manager", None)
+                )
             except Exception as exc:
                 print(f"[OrdersView] Could not create OrdersDB: {exc}")
 
@@ -1278,8 +1880,10 @@ class OrdersView(ctk.CTkFrame):
                 self.invoices = self.db.fetch_invoices()
                 self.customers_raw = self.db.fetch_active_customers()
                 self.parts = self.db.fetch_parts()
-                print(f"[OrdersView] Loaded {len(self.invoices)} invoices, "
-                      f"{len(self.customers_raw)} customers, {len(self.parts)} parts from DB.")
+                print(
+                    f"[OrdersView] Loaded {len(self.invoices)} invoices, "
+                    f"{len(self.customers_raw)} customers, {len(self.parts)} parts from DB."
+                )
                 return
             except Exception as exc:
                 print(f"[OrdersView] DB load failed: {exc} — using demo data.")
@@ -1305,18 +1909,26 @@ class OrdersView(ctk.CTkFrame):
         title_bar = tk.Frame(self, bg=C["bg"])
         title_bar.grid(row=0, column=0, sticky="ew", padx=24, pady=(16, 4))
 
-        tk.Label(title_bar, text="Orders & Invoices", font=FONT_H1,
-                 bg=C["bg"], fg=C["text"]).pack(side="left")
-        tk.Label(title_bar,
-                 text=f"  ·  {date.today().strftime('%B %d, %Y')}",
-                 font=("Segoe UI", 11), bg=C["bg"], fg=C["text_muted"]
-                 ).pack(side="left", pady=4)
+        tk.Label(
+            title_bar, text="Orders & Invoices", font=FONT_H1, bg=C["bg"], fg=C["text"]
+        ).pack(side="left")
+        tk.Label(
+            title_bar,
+            text=f"  ·  {date.today().strftime('%B %d, %Y')}",
+            font=("Segoe UI", 11),
+            bg=C["bg"],
+            fg=C["text_muted"],
+        ).pack(side="left", pady=4)
 
         # DB connection indicator
         db_indicator = "🟢 Live DB" if self.db else "🟡 Demo Mode"
-        tk.Label(title_bar, text=db_indicator, font=("Segoe UI", 9),
-                 bg=C["bg"], fg=C["success"] if self.db else C["warn"]
-                 ).pack(side="right", pady=4)
+        tk.Label(
+            title_bar,
+            text=db_indicator,
+            font=("Segoe UI", 9),
+            bg=C["bg"],
+            fg=C["success"] if self.db else C["warn"],
+        ).pack(side="right", pady=4)
 
         # ── KPI Bar ───────────────────────────────────────────────────────────
         self.kpi_bar = KPIBar(self, self.invoices)
@@ -1360,7 +1972,8 @@ class OrdersView(ctk.CTkFrame):
         """Persist new invoice to DB, then update the UI."""
         employee_number = (
             getattr(self.controller.session, "employee_number", None)
-            if hasattr(self.controller, "session") else None
+            if hasattr(self.controller, "session")
+            else None
         )
 
         if self.db and employee_number:
@@ -1373,16 +1986,17 @@ class OrdersView(ctk.CTkFrame):
                     manager_override=data.get("manager_override", False),
                 )
                 new_inv = {
-                    "invoice_id":     result["invoice_id"],
-                    "invoice_number": result["invoice_number"],
-                    "customer_name":  data["customer_name"],
-                    "company_name":   data["company_name"],
-                    "customer_address": data.get("customer_address", "—"),
+                    "invoice_id": result["invoice_id"],
+                    "invoice_number": fmt_invoice(
+                        result["invoice_id"], data["company_name"]
+                    ),
+                    "customer_name": data["customer_name"],
+                    "company_name": data["company_name"],
                     "customer_number": data["customer_number"],
-                    "amount":         result["total"],
-                    "status":         "active",
-                    "date":           result["date"],
-                    "sales_rep":      getattr(self.controller.session, "employee_name", "—"),
+                    "amount": result["total"],
+                    "status": "active",
+                    "date": result["date"],
+                    "sales_rep": getattr(self.controller.session, "employee_name", "—"),
                     "employee_number": employee_number,
                 }
             except ValueError as exc:
@@ -1390,25 +2004,28 @@ class OrdersView(ctk.CTkFrame):
                 messagebox.showerror("Order Validation Failed", str(exc))
                 return
             except Exception as exc:
-                messagebox.showerror("Database Error",
-                                     f"Could not save invoice to database:\n{exc}")
+                messagebox.showerror(
+                    "Database Error", f"Could not save invoice to database:\n{exc}"
+                )
                 return
         else:
             # Demo / no-session fallback
             fallback_id = len(self.invoices) + 1300
             new_inv = {
-                "invoice_id":     fallback_id,
-                "invoice_number": f"INV-{fallback_id}",
-                "customer_name":  data["customer_name"],
-                "company_name":   data.get("company_name", "—"),
-                "customer_address": data.get("customer_address", "—"),
+                "invoice_id": fallback_id,
+                "invoice_number": fmt_invoice(
+                    fallback_id, data.get("company_name", "")
+                ),
+                "customer_name": data["customer_name"],
+                "company_name": data.get("company_name", "—"),
                 "customer_number": data["customer_number"],
-                "amount":         data["total"],
-                "status":         "active",
-                "date":           date.today().isoformat(),
-                "sales_rep":      getattr(
+                "amount": data["total"],
+                "status": "active",
+                "date": date.today().isoformat(),
+                "sales_rep": getattr(
                     getattr(self.controller, "session", None),
-                    "employee_name", "Current User"
+                    "employee_name",
+                    "Current User",
                 ),
             }
 
@@ -1435,7 +2052,6 @@ class OrdersView(ctk.CTkFrame):
         self.create_panel._update_total()
         self.create_panel.cust_var.set("Select Contact…")
         self.create_panel.company_var.set("Select Company…")
-        self.create_panel.company_lbl.configure(text="—", fg=C["text_muted"])
         self.create_panel.part_var.set("Select Item…")
         self.create_panel.price_lbl.configure(text="—")
         self.create_panel.stock_lbl.configure(text="")
@@ -1452,33 +2068,135 @@ class OrdersView(ctk.CTkFrame):
 #  DEMO DATA  (fallback when DB is unavailable)
 # ══════════════════════════════════════════════════════════════════════════════
 DEMO_INVOICES = [
-    {"invoice_id": 1201, "invoice_number": "INV-1201", "customer_name": "Maria Santos", "company_name": "ABC Solutions",
-     "amount": 1450.00, "status": "active",  "date": "2006-08-07", "sales_rep": "Maria G.", "customer_number": 1},
-    {"invoice_id": 1202, "invoice_number": "INV-1202", "customer_name": "John Dela Cruz", "company_name": "Global Corp",
-     "amount": 3230.00, "status": "shipped", "date": "2006-08-06", "sales_rep": "John D.",  "customer_number": 2},
-    {"invoice_id": 1203, "invoice_number": "INV-1203", "customer_name": "Ana Reyes", "company_name": "Enterprise Inc.",
-     "amount": 1550.00, "status": "active",  "date": "2006-08-05", "sales_rep": "Maria G.", "customer_number": 3},
-    {"invoice_id": 1204, "invoice_number": "INV-1204", "customer_name": "Maria Santos", "company_name": "ABC Solutions",
-     "amount": 1450.00, "status": "paid",    "date": "2006-08-04", "sales_rep": "Ken C.",   "customer_number": 1},
-    {"invoice_id": 1205, "invoice_number": "INV-1205", "customer_name": "John Dela Cruz", "company_name": "Global Corp",
-     "amount": 1250.00, "status": "active",  "date": "2006-08-03", "sales_rep": "John D.",  "customer_number": 2},
+    {
+        "invoice_id": 1201,
+        "invoice_number": "INV-1201",
+        "customer_name": "Maria Santos",
+        "company_name": "ABC Solutions",
+        "amount": 1450.00,
+        "status": "active",
+        "date": "2006-08-07",
+        "sales_rep": "Maria G.",
+        "customer_number": 1,
+    },
+    {
+        "invoice_id": 1202,
+        "invoice_number": "INV-1202",
+        "customer_name": "John Dela Cruz",
+        "company_name": "Global Corp",
+        "amount": 3230.00,
+        "status": "shipped",
+        "date": "2006-08-06",
+        "sales_rep": "John D.",
+        "customer_number": 2,
+    },
+    {
+        "invoice_id": 1203,
+        "invoice_number": "INV-1203",
+        "customer_name": "Ana Reyes",
+        "company_name": "Enterprise Inc.",
+        "amount": 1550.00,
+        "status": "active",
+        "date": "2006-08-05",
+        "sales_rep": "Maria G.",
+        "customer_number": 3,
+    },
+    {
+        "invoice_id": 1204,
+        "invoice_number": "INV-1204",
+        "customer_name": "Maria Santos",
+        "company_name": "ABC Solutions",
+        "amount": 1450.00,
+        "status": "paid",
+        "date": "2006-08-04",
+        "sales_rep": "Ken C.",
+        "customer_number": 1,
+    },
+    {
+        "invoice_id": 1205,
+        "invoice_number": "INV-1205",
+        "customer_name": "John Dela Cruz",
+        "company_name": "Global Corp",
+        "amount": 1250.00,
+        "status": "active",
+        "date": "2006-08-03",
+        "sales_rep": "John D.",
+        "customer_number": 2,
+    },
 ]
 
 DEMO_CUSTOMERS = [
-    "Acme Corp", "ABC Solutions", "Global Corp", "Enterprise Inc.",
-    "Beta Solutions", "Global Logistics", "Springfield Inc.",
-    "Gamma Co.", "Delta Ltd.", "Omega Holdings",
+    "Acme Corp",
+    "ABC Solutions",
+    "Global Corp",
+    "Enterprise Inc.",
+    "Beta Solutions",
+    "Global Logistics",
+    "Springfield Inc.",
+    "Gamma Co.",
+    "Delta Ltd.",
+    "Omega Holdings",
 ]
 
 DEMO_PARTS = [
-    {"part_number": 1,  "description": "NOS Copy Paper A4 - 500 Sheets",   "selling_price": 12.99,  "stock_count": 1500},
-    {"part_number": 2,  "description": "Standard Pens Box (Blue, 12pk)",    "selling_price": 4.50,   "stock_count": 420},
-    {"part_number": 3,  "description": "Manila Folders Pack (25pk)",         "selling_price": 8.00,   "stock_count": 960},
-    {"part_number": 4,  "description": "Heavy Duty Stapler",                 "selling_price": 25.00,  "stock_count": 2},
-    {"part_number": 5,  "description": "USB-C Cables 6ft",                   "selling_price": 15.50,  "stock_count": 210},
-    {"part_number": 6,  "description": "Ergonomic Task Chair",               "selling_price": 299.00, "stock_count": 0},
-    {"part_number": 7,  "description": "Whiteboard Markers (8pk)",           "selling_price": 6.75,   "stock_count": 85},
-    {"part_number": 8,  "description": "Executive Gel Pen Black 12pk",       "selling_price": 18.50,  "stock_count": 450},
-    {"part_number": 9,  "description": "Wireless Keyboard Ultra-Compact",    "selling_price": 89.00,  "stock_count": 8},
-    {"part_number": 10, "description": "Monitor Mount Arm Dual Screen",      "selling_price": 145.00, "stock_count": 15},
+    {
+        "part_number": 1,
+        "description": "NOS Copy Paper A4 - 500 Sheets",
+        "selling_price": 12.99,
+        "stock_count": 1500,
+    },
+    {
+        "part_number": 2,
+        "description": "Standard Pens Box (Blue, 12pk)",
+        "selling_price": 4.50,
+        "stock_count": 420,
+    },
+    {
+        "part_number": 3,
+        "description": "Manila Folders Pack (25pk)",
+        "selling_price": 8.00,
+        "stock_count": 960,
+    },
+    {
+        "part_number": 4,
+        "description": "Heavy Duty Stapler",
+        "selling_price": 25.00,
+        "stock_count": 2,
+    },
+    {
+        "part_number": 5,
+        "description": "USB-C Cables 6ft",
+        "selling_price": 15.50,
+        "stock_count": 210,
+    },
+    {
+        "part_number": 6,
+        "description": "Ergonomic Task Chair",
+        "selling_price": 299.00,
+        "stock_count": 0,
+    },
+    {
+        "part_number": 7,
+        "description": "Whiteboard Markers (8pk)",
+        "selling_price": 6.75,
+        "stock_count": 85,
+    },
+    {
+        "part_number": 8,
+        "description": "Executive Gel Pen Black 12pk",
+        "selling_price": 18.50,
+        "stock_count": 450,
+    },
+    {
+        "part_number": 9,
+        "description": "Wireless Keyboard Ultra-Compact",
+        "selling_price": 89.00,
+        "stock_count": 8,
+    },
+    {
+        "part_number": 10,
+        "description": "Monitor Mount Arm Dual Screen",
+        "selling_price": 145.00,
+        "stock_count": 15,
+    },
 ]

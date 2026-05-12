@@ -28,6 +28,7 @@ try:
 except ImportError:
     HAS_PSYCOPG2 = False
 
+from backend.report_service import ReportService
 
 # ── Design tokens (extracted directly from screenshot) ────────────────────
 PAGE_BG = "#f0f2f5"  # page / scrollable frame bg
@@ -186,6 +187,9 @@ class WeeklySalesReportView(ctk.CTkScrollableFrame):
         self.db_config: DBConfig | None = db_config
         self._on_toggle_navigation = on_toggle_navigation
         self._is_navigation_visible = is_navigation_visible
+        self._report_service = ReportService(
+            self.db_config or {}, getattr(controller, "session_manager", None)
+        )
         self._all_rows = []
         self._week_end = "2006-08-09"
         self._active_tab = tk.StringVar(value="overview")
@@ -733,34 +737,48 @@ class WeeklySalesReportView(ctk.CTkScrollableFrame):
 
     def _fetch_from_db(self):
         try:
-            db_config = self.db_config
-            if not HAS_PSYCOPG2 or psycopg2 is None or not db_config:
+            if not self._report_service or not self.db_config:
                 return list(SAMPLE_ROWS)
-            conn = psycopg2.connect(**db_config)
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT
-                        sr.rep_id,
-                        e.emp_name,
-                        COALESCE(SUM(i.total_amount),  0)          AS total_sales,
-                        COUNT(i.invoice_id)                        AS num_invoices,
-                        COALESCE(MAX(i.total_amount),  0)          AS largest_sale,
-                        COALESCE(AVG(i.total_amount),  0)          AS avg_sale,
-                        COUNT(DISTINCT i.customer_id)              AS num_customers,
-                        COALESCE(SUM(i.total_amount),  0) * 0.05   AS commission,
-                        %s::date
-                    FROM salesrep sr
-                    JOIN employee e   ON e.emp_id  = sr.emp_id
-                    LEFT JOIN invoice i ON i.rep_id = sr.rep_id
-                        AND i.invoice_date <= %s::date
-                        AND i.invoice_date >  %s::date - INTERVAL '7 days'
-                    GROUP BY sr.rep_id, e.emp_name
-                    ORDER BY total_sales DESC
-                """,
-                    (self._week_end,) * 3,
+            rows = self._report_service.execute_query(
+                """
+                SELECT
+                    e.employee_number                      AS rep_id,
+                    e.employee_name                        AS emp_name,
+                    COALESCE(SUM(i.total_amount), 0)       AS total_sales,
+                    COUNT(i.invoice_id)                    AS num_invoices,
+                    COALESCE(MAX(i.total_amount), 0)       AS largest_sale,
+                    COALESCE(AVG(i.total_amount), 0)       AS avg_sale,
+                    COUNT(DISTINCT i.customer_number)      AS num_customers,
+                    COALESCE(SUM(i.total_amount), 0)
+                        * COALESCE(e.commission_rate, 0)    AS commission,
+                    %s::date                               AS week_end
+                FROM employees e
+                LEFT JOIN invoices i
+                    ON i.employee_number = e.employee_number
+                   AND i.date_written <= %s::date
+                   AND i.date_written > %s::date - INTERVAL '7 days'
+                   AND COALESCE(i.status, '') <> 'void'
+                WHERE e.position = 'Sales Rep'
+                  AND e.is_active = TRUE
+                GROUP BY e.employee_number, e.employee_name, e.commission_rate
+                ORDER BY total_sales DESC, e.employee_number
+            """,
+                (self._week_end,) * 3,
+            )
+            return [
+                (
+                    row["rep_id"],
+                    row["emp_name"],
+                    row["total_sales"],
+                    row["num_invoices"],
+                    row["largest_sale"],
+                    row["avg_sale"],
+                    row["num_customers"],
+                    row["commission"],
+                    row["week_end"],
                 )
-                return cur.fetchall()
+                for row in rows
+            ]
         except Exception as ex:
             messagebox.showerror(
                 "Database Error",

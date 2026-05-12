@@ -16,10 +16,13 @@ from typing import TypedDict
 
 from frontend.tabs.reports_tab.weekly_sales import WeeklySalesReportView
 from frontend.tabs.reports_tab.stock_ordering import StockOrderingReportView
+from frontend.tabs.reports_tab.audit_log import AuditLogReportView
 from frontend.modular.reports_sidebar import ReportsSidebar
 from frontend.tabs.reports_tab.inventory_report import InventorySalesReportView
 from frontend.tabs.reports_tab.customerList_balances import CustomerListReportView
-from frontend.tabs.reports_tab.customer_payment_history import CustomerPaymentHistoryView
+from frontend.tabs.reports_tab.customer_payment_history import (
+    CustomerPaymentHistoryView,
+)
 
 
 class DBConfig(TypedDict):
@@ -39,6 +42,7 @@ class ReportsHubView(ctk.CTkFrame):
         ("stock_ordering", "Stock Ordering Report"),
         ("customer_balances", "Customer List & Balances"),
         ("customer_payments", "Customer Payment History"),
+        ("audit_log", "Audit Log"),
     ]
 
     META = {
@@ -61,6 +65,10 @@ class ReportsHubView(ctk.CTkFrame):
         "customer_payments": {
             "subtitle": "Tracking changes and payments - Point 1",
             "description": "Payment timeline, amount changes, and audit trail snapshots.",
+        },
+        "audit_log": {
+            "subtitle": "Sensitive action log",
+            "description": "Price updates, payroll issuance, shipments, and balance adjustments.",
         },
     }
 
@@ -238,6 +246,14 @@ class ReportsHubView(ctk.CTkFrame):
             )
         elif section_key == "customer_payments":
             return CustomerPaymentHistoryView(
+                self.view_host,
+                controller=self.controller,
+                db_config=self.db_config,
+                on_toggle_navigation=self.toggle_navigation,
+                is_navigation_visible=self._sidebar_visible,
+            )
+        elif section_key == "audit_log":
+            return AuditLogReportView(
                 self.view_host,
                 controller=self.controller,
                 db_config=self.db_config,

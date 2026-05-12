@@ -16,7 +16,7 @@ from frontend.tabs.customers import CustomersView
 from frontend.tabs.inventory import InventoryView
 from frontend.tabs.orders_and_invoices import OrdersView
 from frontend.tabs.reports_tab.reports import DBConfig, ReportsHubView
-from frontend.tabs.payroll import PayrollView  # , auto_generate_timecards
+from frontend.tabs.payroll import PayrollView, auto_generate_timecards
 
 load_dotenv()
 
@@ -89,7 +89,7 @@ class NationalOfficeApp(ctk.CTk):
         self.show_dashboard()
 
         # 7. Auto-generate timecards for the current week
-        # auto_generate_timecards(self.db_config)
+        auto_generate_timecards(self.db_config)
 
     def logout(self):
         """Clears session and returns to login."""

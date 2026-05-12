@@ -8,6 +8,7 @@ CustomersView delegates to this instead of calling psycopg2 directly.
 import psycopg2
 from decimal import Decimal
 
+from backend.audit_logger import write_audit_log
 from backend.session_manager import SessionManager
 
 
@@ -232,10 +233,45 @@ class CustomerService:
             WHERE customer_number = %s
             RETURNING current_balance;
         """
-        row = self._exec(sql, (delta, cust_id), fetch="one")
-        if row is None:
-            raise RuntimeError(f"Customer {cust_id} not found.")
-        return row[0]
+        conn = self._connect()
+        try:
+            with conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT current_balance
+                        FROM customers
+                        WHERE customer_number = %s
+                        FOR UPDATE;
+                        """,
+                        (cust_id,),
+                    )
+                    row = cur.fetchone()
+                    if row is None:
+                        raise RuntimeError(f"Customer {cust_id} not found.")
+                    old_balance = row[0] or Decimal("0.00")
+
+                    cur.execute(sql, (delta, cust_id))
+                    new_row = cur.fetchone()
+                    if new_row is None:
+                        raise RuntimeError(f"Customer {cust_id} not found.")
+
+                    write_audit_log(
+                        conn,
+                        self._session_manager,
+                        "BALANCE_UPDATE",
+                        "Customers",
+                        cust_id,
+                        {
+                            "old_balance": old_balance,
+                            "new_balance": new_row[0],
+                            "reason": "customer service balance adjustment",
+                            "delta": delta,
+                        },
+                    )
+                    return new_row[0]
+        finally:
+            conn.close()
 
     def delete(self, cust_id: int) -> None:
         """

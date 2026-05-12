@@ -938,6 +938,14 @@ class CustomersView(ctk.CTkFrame):
                 f"Customer added (ID {new_id}) with balance ₱{opening_balance:,.2f}.",
             )
             self.load_customers()
+        except psycopg2.IntegrityError as e:
+            print("Integrity error adding customer:", e)
+            messagebox.showerror(
+                "Validation Error",
+                "Could not add customer: duplicate or invalid record.",
+            )
+        except PermissionError as e:
+            messagebox.showerror("Access Denied", str(e))
         except Exception as e:
             print("Error adding customer:", e)
             messagebox.showerror("Error", f"Could not add customer: {e}")
@@ -977,6 +985,15 @@ class CustomersView(ctk.CTkFrame):
         method = self.method_dropdown.get().strip().lower()
 
         try:
+            customer = self._customer_svc.get_by_id(cust_id)
+            outstanding = customer["current_balance"] if customer else Decimal("0.00")
+            if amount > max(outstanding, Decimal("0.00")):
+                messagebox.showwarning(
+                    "Validation",
+                    f"Payment cannot exceed the outstanding balance (₱{outstanding:,.2f}).",
+                )
+                return
+
             self._payment_svc.record_payment(
                 cust_id=cust_id,
                 amount=amount,
@@ -997,8 +1014,16 @@ class CustomersView(ctk.CTkFrame):
             self._refresh_filter_chip_styles()
             self.load_customers()
 
+        except PermissionError as e:
+            messagebox.showerror("Access Denied", str(e))
         except (ValueError, RuntimeError) as e:
             messagebox.showwarning("Validation", str(e))
+        except psycopg2.IntegrityError as e:
+            print("Integrity error processing payment:", e)
+            messagebox.showerror(
+                "Validation Error",
+                "Could not process payment because of a database constraint.",
+            )
         except Exception as e:
             print("Error processing payment:", e)
             messagebox.showerror("Error", f"Could not process payment: {e}")

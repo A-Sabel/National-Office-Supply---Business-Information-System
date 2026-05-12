@@ -118,19 +118,29 @@ COMMENT ON COLUMN item_parts.cost  IS 'Purchase cost NOS pays — distinct from 
 
 -- TABLE 6: invoices
 CREATE TABLE invoices (
-    invoice_id      SERIAL         PRIMARY KEY,
-    employee_number INTEGER       NOT NULL REFERENCES employees(employee_number)
-                                      ON DELETE RESTRICT ON UPDATE CASCADE,
-    customer_number INTEGER       NOT NULL REFERENCES customers(customer_number)
-                                      ON DELETE RESTRICT ON UPDATE CASCADE,
-    date_written    DATE           NOT NULL DEFAULT CURRENT_DATE,
-    total_amount    NUMERIC(10,2)  NOT NULL DEFAULT 0.00 CHECK (total_amount >= 0),
-    status          VARCHAR(20)    NOT NULL DEFAULT 'active'
-                       CHECK (status IN ('active', 'shipped', 'paid', 'void'))
+    invoice_id      SERIAL          PRIMARY KEY,
+    employee_number INTEGER         NOT NULL REFERENCES employees(employee_number)
+                                        ON DELETE RESTRICT ON UPDATE CASCADE,
+    customer_number INTEGER         NOT NULL REFERENCES customers(customer_number)
+                                        ON DELETE RESTRICT ON UPDATE CASCADE,
+    date_written    DATE            NOT NULL DEFAULT CURRENT_DATE,
+    total_amount    NUMERIC(10,2)   NOT NULL DEFAULT 0.00 CHECK (total_amount >= 0),
+    status          VARCHAR(20)     NOT NULL DEFAULT 'active'
+                        CHECK (status IN ('active', 'shipped', 'paid', 'void')),
+    display_id      TEXT            GENERATED ALWAYS AS (
+                        'INV-' || LPAD(invoice_id::TEXT, 4, '0')
+                    ) STORED
 );
 
-COMMENT ON TABLE  invoices        IS 'Sales orders written by a sales rep for a customer.';
-COMMENT ON COLUMN invoices.status IS 'Lifecycle: active → shipped → paid (or void).';
+ALTER TABLE invoices
+ADD COLUMN display_id TEXT GENERATED ALWAYS AS (
+    'INV-' || LPAD(invoice_id::TEXT, 4, '0')
+) STORED;
+
+COMMENT ON TABLE  invoices           IS 'Sales orders written by a sales rep for a customer.';
+COMMENT ON COLUMN invoices.status    IS 'Lifecycle: active → shipped → paid (or void).';
+COMMENT ON COLUMN invoices.display_id IS 'Auto-formatted display ID e.g. INV-0042. Use Python formatter for company abbreviation variant.';
+
 
 
 
@@ -165,14 +175,24 @@ COMMENT ON COLUMN timecards.week_date  IS 'The week-ending (Saturday) date for t
 -- TABLE 9: purchase_orders
 CREATE TABLE purchase_orders (
     po_number         SERIAL PRIMARY KEY,
-    supplier_id INTEGER NOT NULL REFERENCES suppliers(supplier_id)
+    supplier_id       INTEGER NOT NULL REFERENCES suppliers(supplier_id)
                            ON DELETE RESTRICT ON UPDATE CASCADE,
-    part_number INTEGER NOT NULL REFERENCES parts(part_number)
+    part_number       INTEGER NOT NULL REFERENCES parts(part_number)
                            ON DELETE RESTRICT ON UPDATE CASCADE,
     order_date        DATE NOT NULL DEFAULT CURRENT_DATE,
-    quantity_ordered INTEGER NOT NULL CHECK (quantity_ordered > 0),
-    received          BOOLEAN NOT NULL DEFAULT FALSE
+    quantity_ordered  INTEGER NOT NULL CHECK (quantity_ordered > 0),
+    received          BOOLEAN NOT NULL DEFAULT FALSE,
+    
+    -- New columns for Delivery Workflow
+    date_received     DATE,
+    receipt_reference VARCHAR(100),
+    status            VARCHAR(50) NOT NULL DEFAULT 'Pending'
 );
+
+ALTER TABLE purchase_orders 
+ADD COLUMN IF NOT EXISTS date_received DATE,
+ADD COLUMN IF NOT EXISTS receipt_reference VARCHAR(100),
+ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'Pending';
 
 COMMENT ON TABLE  purchase_orders IS 'Restocking orders placed with suppliers.';
 COMMENT ON COLUMN purchase_orders.received IS 'Set TRUE when stock arrives; triggers stock_count update.';
@@ -212,6 +232,20 @@ COMMENT ON TABLE  employee_payments              IS 'Payment records for all emp
 COMMENT ON COLUMN employee_payments.timecard_id  IS 'NULL for sales reps; references timecard for hourly employees.';
 COMMENT ON COLUMN employee_payments.invoice_period_end IS 'Week-ending date for commission period; NULL for hourly timecards.';
 COMMENT ON COLUMN employee_payments.payment_type IS 'Either "hourly" (from timecard) or "commission" (from ytdsales).';
+
+
+-- TABLE 12: logs
+CREATE TABLE logs (
+    log_id       SERIAL PRIMARY KEY,
+    actor_id     INTEGER,
+    action_type  VARCHAR(50) NOT NULL,
+    target_table VARCHAR(50) NOT NULL,
+    target_id    INTEGER,
+    timestamp    TIMESTAMP NOT NULL DEFAULT NOW(),
+    details      TEXT
+);
+
+COMMENT ON TABLE logs IS 'Audit trail for sensitive application actions.';
 
 
 

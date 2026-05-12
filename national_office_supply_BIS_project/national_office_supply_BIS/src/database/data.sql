@@ -51,6 +51,10 @@ VALUES
 (40, 'Domenico D''Amore', 'Youspan', '203-935-7674', '9 Mandaluyong Street', 0, true)
 ON CONFLICT DO NOTHING;
 
+-- Ensure SERIAL sequence for purchase_orders.po_number is aligned to max(po_number)
+SELECT setval(pg_get_serial_sequence('purchase_orders','po_number'),
+              COALESCE((SELECT MAX(po_number) FROM purchase_orders), 0) + 1,
+              false);
 INSERT INTO employees (
     employee_number,
     employee_name,

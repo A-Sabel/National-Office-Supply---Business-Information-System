@@ -68,13 +68,13 @@ Tasks mapped to: All technical implementation items 1–15
 
 - [x] Update `backend/database.py`: Centralized DB connection management (psycopg2 pool or single connection wrapper)
 - [x] Implement `CustomerService`: `get_all()`, `get_by_id()`, `create()`, `update()`, `update_balance()`, `delete()` (soft delete with `is_active = FALSE`)
-- [ ] Implement `PartService`: `get_all()`, `get_by_id()`, `create()`, `update()`, `get_low_stock()`, `update_stock()`, `get_supplier_cost()`
-- [ ] Implement `EmployeeService`: `get_all()`, `get_by_id()`, `get_hourly_staff()`, `get_active_staff()`
-- [ ] Implement `InvoiceService`: `create()`, `add_line_item()`, `get_invoice_total()`, `update_status()`, `get_customer_invoices()`
-- [ ] Implement `TimecardService`: `create_weekly_timecards()`, `get_missing_timecards()`, `mark_complete()`, `check_if_week_exists()`
 - [x] Implement `PaymentService`: `record_payment()`, `get_customer_payments()`, `mark_invoice_paid()`, `update_balance()`
-- [ ] Implement `ReportService`: Base class for report queries with reusable filter/sort/export logic
-- [ ] Implement `SupplierCostService`: `get_lowest_cost_supplier()`, `get_all_costs_for_part()` (maps to Req 14)
+- [x] Implement `PartService`: `get_all()`, `get_by_id()`, `create()`, `update()`, `get_low_stock()`, `update_stock()`, `get_supplier_cost()`
+- [x] Implement `EmployeeService`: `get_all()`, `get_by_id()`, `get_hourly_staff()`, `get_active_staff()`
+- [x] Implement `InvoiceService`: `create()`, `add_line_item()`, `get_invoice_total()`, `update_status()`, `get_customer_invoices()`
+- [x] Implement `TimecardService`: `create_weekly_timecards()`, `get_missing_timecards()`, `mark_complete()`, `check_if_week_exists()`
+- [x] Implement `ReportService`: Base class for report queries with reusable filter/sort/export logic
+- [x] Implement `SupplierCostService`: `get_lowest_cost_supplier()`, `get_all_costs_for_part()` (maps to Req 14)
 - [ ] **Deliverable:** Service layer with tested basic CRUD and query operations; all tab views can delegate to services
 
 #### 1C. RBAC & Security Foundations (Week 1, Days 4–5 + Week 2, Day 1) — **PRIORITY: HIGH**
@@ -85,8 +85,8 @@ Tasks mapped to: FS-Sec1, FS-Sec2, FS-Sec3, Req 16
 - [x] Extend `__main__.py` session state: Track `current_user`, `user_role` (Manager/Rep/Hourly), `session_start_time`
 - [x] Create RBAC guard module: `@require_role('Manager')`, `@require_role('Rep')`, etc.
 - [x] Update `navigation_bar.py`: Conditionally show/hide tabs based on `current_user.position` (Payroll/Timecards hidden for Reps)
-- [ ] Implement `SessionManager`: Session validation, timeout, role-based view access checks
-- [ ] Add SSN encryption utility: `encrypt_ssn()`, `decrypt_ssn()` (using `cryptography` library or simple AES)
+  - [x] Implement `SessionManager`: Session validation, timeout, role-based view access checks
+  - [x] Add SSN encryption utility: `encrypt_ssn()`, `decrypt_ssn()` (using `cryptography` library or simple AES)
 - [x] Validate automated ID strategy: Ensure all primary keys use `SERIAL`/`BIGSERIAL` (FS-Sec2)
 - [ ] **Deliverable:** Login flow secure and session-aware; Managers vs. Reps see different UIs; SSN encrypted in DB
 
@@ -265,24 +265,24 @@ Tasks mapped to: All requirements via test coverage
 
 Tasks mapped to: FS-Sec1, FS-Sec2; Safety Nets 1–3
 
-- [ ] Implement audit logging in critical flows:
-  - [ ] Log every price modification: INSERT `Logs(actor_id, action='PRICE_UPDATE', target_table='Parts', target_id=part_id, details='{old_price, new_price}', timestamp=NOW())`
-  - [ ] Log every payroll check issuance: INSERT `Logs(actor_id, action='PAYROLL_ISSUED', target_table='Payments', target_id=payment_id, details='{employee_id, amount}', timestamp=NOW())`
-  - [ ] Log every invoice shipment: INSERT `Logs(actor_id, action='INVOICE_SHIPPED', target_table='Invoices', target_id=invoice_id, details='{status_change, stock_decrements}', timestamp=NOW())`
-  - [ ] Log customer balance updates: INSERT `Logs(actor_id, action='BALANCE_UPDATE', target_table='Customers', target_id=customer_id, details='{old_balance, new_balance, reason}', timestamp=NOW())`
-- [ ] Weekly trigger resilience (Safety Net 2):
-  - [ ] Change timecard generation from strict "Monday 12:00 AM" to "on app startup"
-  - [ ] Check if timecards for current week exist
-  - [ ] Only create if missing (idempotent logic)
+- [x] Implement audit logging in critical flows:
+  - [x] Log every price modification: INSERT `Logs(actor_id, action='PRICE_UPDATE', target_table='Parts', target_id=part_id, details='{old_price, new_price}', timestamp=NOW())`
+  - [x] Log every payroll check issuance: INSERT `Logs(actor_id, action='PAYROLL_ISSUED', target_table='Payments', target_id=payment_id, details='{employee_id, amount}', timestamp=NOW())`
+  - [x] Log every invoice shipment: INSERT `Logs(actor_id, action='INVOICE_SHIPPED', target_table='Invoices', target_id=invoice_id, details='{status_change, stock_decrements}', timestamp=NOW())`
+  - [x] Log customer balance updates: INSERT `Logs(actor_id, action='BALANCE_UPDATE', target_table='Customers', target_id=customer_id, details='{old_balance, new_balance, reason}', timestamp=NOW())`
+- [x] Weekly trigger resilience (Safety Net 2):
+  - [x] Change timecard generation from strict "Monday 12:00 AM" to "on app startup"
+  - [x] Check if timecards for current week exist
+  - [x] Only create if missing (idempotent logic)
   - [ ] Test: Restart app 3 times in same week → verify only 1 timecard set created
-- [ ] Data integrity constraints (Safety Net 3):
-  - [ ] Add `UNIQUE(part_id, supplier_id)` on `Part_Suppliers`
-  - [ ] Verify no duplicate supplier-part entries can be inserted
+- [x] Data integrity constraints (Safety Net 3):
+  - [x] Add `UNIQUE(part_id, supplier_id)` on `Part_Suppliers`
+  - [x] Verify no duplicate supplier-part entries can be inserted
   - [ ] Test constraint violation → error handling in UI
-- [ ] Query audit report:
-  - [ ] Expose `Logs` table via read-only query in Reports tab
-  - [ ] Filter by action type, date range, actor
-  - [ ] Export to CSV for instructor verification
+- [x] Query audit report:
+  - [x] Expose `Logs` table via read-only query in Reports tab
+  - [x] Filter by action type, date range, actor
+  - [x] Export to CSV for instructor verification
 - [ ] **Deliverable:** Audit trail complete for all sensitive actions; resilience patterns in place; all safety nets verified
 
 #### 3C. Controller Layer & Authorization (Week 5, Days 4–5 + Week 6, Day 1) — **PRIORITY: MEDIUM**
@@ -292,21 +292,23 @@ Tasks mapped to: FS-Sec3, FS-Sec5, FS-Sec6
 - [x] Add transaction guards to all writes:
   - [x] `@auth_required`, `@role_required('Manager')` decorators on sensitive endpoints
   - [x] Re-validate user session before INSERT/UPDATE/DELETE
-  - [ ] Wrap multi-step operations (e.g., shipment → stock decrement → balance update) in transaction block
-- [ ] Restrict price edits:
-  - [ ] `InventoryView` price field: Read-only unless `current_user.position == 'Manager'`
-  - [ ] Backend: `PartService.update()` checks role before allowing price change
-- [x] Restrict worker file access (timecards, payroll):
+  - [x] Wrap multi-step operations (e.g., shipment → stock decrement → balance update) in transaction block
+        [x] Restrict worker file access (timecards, payroll):
   - [x] `PayrollView`, `PayrollView.timecards_panel`: Hidden for non-Managers
-  - [ ] Backend: Query endpoints return 403 if non-Manager requests payroll/timecard data
-- [ ] Form validation guards:
-  - [ ] Invoice line qty >= 1 and <= stock_count (unless Manager override)
-  - [ ] Payment amount > 0 and <= outstanding balance
-  - [ ] Timecard hours >= 0 and <= 168 (max hours in week)
-- [ ] Error handling:
-  - [ ] Invalid form data → show validation error message (red banner)
-  - [ ] Unauthorized action → show "Access Denied" alert
-  - [ ] Database constraint violation → show friendly error (e.g., "Duplicate supplier for this part")
+  - [x] Backend: Query endpoints return 403 if non-Manager requests payroll/timecard data
+        [x] Restrict price edits:
+  - [x] `InventoryView` price field: Read-only unless current user is Manager (UI guard)
+  - [x] Backend: `PartService.update()` checks role before allowing price change
+        [x] Form validation guards:
+  - [x] Invoice line qty >= 1 and <= stock_count (unless Manager override)
+  - [x] Payment amount > 0 (server-side) and basic validation
+  - [x] Timecard hours >= 0 and <= 168 (max hours in week)
+  - [x] Payment amount > 0 and <= outstanding balance
+  - [x] Timecard hours >= 0 and <= 168 (max hours in week)
+- [x] Error handling:
+  - [x] Invalid form data → show validation error message (red banner)
+  - [x] Unauthorized action → show "Access Denied" alert
+  - [x] Database constraint violation → show friendly error (e.g., "Duplicate supplier for this part")
 - [ ] **Deliverable:** All sensitive writes protected by role checks; form validation in place; error messages user-friendly
 
 #### 3D. Final QA & Verification Package (Week 6, Days 2–5) — **PRIORITY: CRITICAL**
@@ -392,67 +394,67 @@ Phase 3 requires Phase 2 fully complete; focuses on validation and polish.
 
 ### 1. Missing Timecards
 
-- [ ] Run `LEFT JOIN` between `Employees` and `Timecards` for target week
-- [ ] Filter rows where timecard is `NULL`
-- [ ] Exclude `position = 'Sales Rep'`
-- [ ] Filter for active employees only (QD-Sec1)
-- [ ] Validate hourly staff are flagged correctly
+- [x] Run `LEFT JOIN` between `Employees` and `Timecards` for target week
+- [x] Filter rows where timecard is `NULL`
+- [x] Exclude `position = 'Sales Rep'`
+- [x] Filter for active employees only (QD-Sec1)
+- [x] Validate hourly staff are flagged correctly
 
 ### 2. Payroll Issuance
 
-- [ ] Build backend payroll issuance script that iterates `Timecards`
-- [ ] Calculate gross amount using `Gross Amount = Hourly Wage * Hours Worked`
-- [ ] Export payroll output to structured file (`CSV` or `JSON`)
-- [ ] Validate output for bank/check-printing module
+- [x] Build backend payroll issuance script that iterates `Timecards`
+- [x] Calculate gross amount using `Gross Amount = Hourly Wage * Hours Worked`
+- [x] Export payroll output to structured file (`CSV` or `JSON`)
+- [x] Validate output for bank/check-printing module
 
 ### 3. Restock Report
 
-- [ ] Implement query on `Parts` where `stock_count <= trigger_amount`
-- [ ] Expose result in backend reporting endpoint/service
-- [ ] Populate Alerts dropdown with report output
-- [ ] Validate alert data freshness and accuracy
+- [x] Implement query on `Parts` where `stock_count <= trigger_amount`
+- [x] Expose result in backend reporting endpoint/service
+- [x] Populate Alerts dropdown with report output
+- [x] Validate alert data freshness and accuracy
 
 ### 4. Critical Stock Check
 
 - [x] Filter inventory where `stock_count <= 1`
 - [x] Add condition `on_order = False`
 - [x] Surface results as critical alerts
-- [ ] Validate no false positives for items already on order
+- [x] Validate no false positives for items already on order
 
 ### 5. Inventory Bottleneck
 
-- [ ] Join `Invoice_Lines`, `Invoices`, and `Parts`
-- [ ] Identify parts with `stock_count <= 1`
-- [ ] Filter invoices where `is_shipped = False`
-- [ ] Show bottleneck reason for stuck orders
+- [x] Join `Invoice_Lines`, `Invoices`, and `Parts`
+- [x] Identify parts with `stock_count <= 1`
+- [x] Filter invoices where `is_shipped = False`
+- [x] Show bottleneck reason for stuck orders
 
 ### 6. Supplier Cost Analysis
 
-- [ ] Join `Parts`, `Part_Suppliers`, and `Suppliers`
-- [ ] Filter by `trigger_level`
-- [ ] Sort using `ORDER BY part_id, cost ASC`
-- [ ] Confirm cheapest supplier appears first per part
+- [x] Join `Parts`, `Part_Suppliers`, and `Suppliers`
+- [x] Filter by `trigger_level`
+- [x] Sort using `ORDER BY part_id, cost ASC`
+- [x] Confirm cheapest supplier appears first per part
 
 ### 7. Supplier-Centric View
 
-- [ ] Reuse supplier-cost join logic
-- [ ] Sort using `ORDER BY supplier_id, part_id`
-- [ ] Run `SUM(total_amount)` on `Invoices` by `rep_id`
-- [ ] Filter for week ending August 9, 2006
+- [x] Reuse supplier-cost join logic
+- [x] Sort using `ORDER BY supplier_id, part_id`
+- [x] Run `SUM(total_amount)` on `Invoices` by `rep_id`
+- [x] Filter for week ending August 9, 2006
 
 ### 8. YTD Sales Update
 
-- [ ] Write `UPDATE` with subquery for year-to-date totals
-- [ ] Compute `SUM` of invoices per rep from year start
-- [ ] Store result in `ytd_sales` column
-- [ ] Validate values against report output
+- [x] Write `UPDATE` with subquery for year-to-date totals
+- [x] Compute `SUM` of invoices per rep from year start
+- [x] Store result in `ytd_sales` column
+- [x] Validate values against report output
 
 ### 9. Rep Analytics (report1)
 
-- [ ] Compute `SUM(total)`
-- [ ] Compute `COUNT(invoice_id)`
-- [ ] Compute `MAX(total)` and `AVG(total)`
-- [ ] Compute `COUNT(DISTINCT customer_id)`
+- [x] Compute `SUM(total)`
+- [x] Compute `COUNT(invoice_id)`
+- [x] Compute `MAX(total)` and `AVG(total)`
+- [x] Compute `COUNT(DISTINCT customer_id)`
 - [ ] Save analytics to DBF file named `report1` (QD-Sec9)
 - [ ] Sync `report1` data back to `SALESREP` table
 
