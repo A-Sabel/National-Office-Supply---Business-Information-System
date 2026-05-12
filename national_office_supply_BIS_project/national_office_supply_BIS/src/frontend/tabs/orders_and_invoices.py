@@ -457,7 +457,7 @@ class OrdersDB:
                     invoice_id = row["invoice_id"]
                     date_written = row["date_written"]
 
-                    # 2. Insert each line item (stock NOT decremented here — happens on ship)
+                    # 2. Insert each line item and decrement stock immediately on creation
                     for item in line_items:
                         cur.execute(
                             """
@@ -471,6 +471,14 @@ class OrdersDB:
                                 item["quantity"],
                                 round(item["quantity"] * item["unit_price"], 2),
                             ),
+                        )
+                        cur.execute(
+                            """
+                            UPDATE parts
+                            SET stock_count = GREATEST(stock_count - %s, 0)
+                            WHERE part_number = %s
+                            """,
+                            (item["quantity"], item["part_number"]),
                         )
 
                     return {
@@ -1702,6 +1710,11 @@ class CreateInvoicePanel(ctk.CTkFrame):
                 "line_total": line_total,
             }
         )
+        # Decrement in-memory stock so the display reflects the pending quantity
+        for part in self.parts:
+            if part["part_number"] == p["part_number"]:
+                part["stock_count"] = max(0, part["stock_count"] - qty)
+                break
         self._refresh_items_list()
         self._update_total()
         self.part_var.set("Select Item…")
@@ -1794,7 +1807,12 @@ class CreateInvoicePanel(ctk.CTkFrame):
 
     def _remove_item(self, idx):
         if 0 <= idx < len(self.line_items):
-            self.line_items.pop(idx)
+            removed = self.line_items.pop(idx)
+            # Restore in-memory stock for the removed item
+            for part in self.parts:
+                if part["part_number"] == removed["part_number"]:
+                    part["stock_count"] += removed["quantity"]
+                    break
             self._refresh_items_list()
             self._update_total()
 
