@@ -442,6 +442,16 @@ class OrdersDB:
         try:
             with conn:
                 with conn.cursor(cursor_factory=self._dict_cursor_factory()) as cur:
+                    # 🔧 Pre-emptive sequence fix
+                    cur.execute(
+                        """
+                        SELECT setval(
+                            pg_get_serial_sequence('invoices', 'invoice_id'),
+                            COALESCE((SELECT MAX(invoice_id) FROM invoices), 0)
+                        )
+                        """
+                    )
+
                     # 1. Create the invoice header (status = 'active')
                     cur.execute(
                         """
