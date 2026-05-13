@@ -19,6 +19,7 @@ import customtkinter as ctk
 import psycopg2
 
 from backend.report_service import ReportService
+from .csv_tab import export_customer_payments
 
 # ── Shared colour palette ─────────────────────────────────────────────────────
 BRAND_NAVY = "#001440"
@@ -677,22 +678,6 @@ class CustomerPaymentHistoryView(ctk.CTkFrame):
 
     # ── CSV export ────────────────────────────────────────────────────────────
     def _export_csv(self):
-        today = datetime.date.today().strftime("%Y-%m-%d")
         headers = [self._tree.heading(c)["text"] for c in self._tree["columns"]]
-        path = fd.asksaveasfilename(
-            defaultextension=".csv",
-            filetypes=[("CSV files", "*.csv")],
-            initialfile=f"payment_history_{today}.csv",
-            title="Save Payment History",
-        )
-        if not path:
-            return
-        try:
-            with open(path, "w", newline="", encoding="utf-8-sig") as f:
-                writer = csv.writer(f)
-                writer.writerow(headers)
-                for iid in self._tree.get_children():
-                    writer.writerow(self._tree.item(iid, "values"))
-            messagebox.showinfo("Export Complete", f"Report saved to:\n{path}")
-        except Exception as ex:
-            messagebox.showerror("Export Failed", str(ex))
+        rows = [self._tree.item(iid, "values") for iid in self._tree.get_children()]
+        export_customer_payments(self, rows, headers)

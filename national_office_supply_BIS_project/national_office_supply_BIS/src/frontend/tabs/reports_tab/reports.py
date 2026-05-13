@@ -121,11 +121,9 @@ class ReportsHubView(ctk.CTkFrame):
             self.sidebar.grid(row=0, column=0, sticky="ns", padx=(12, 10), pady=12)
             self._sidebar_visible = True
 
-        weekly_view = self._section_frames.get("weekly_sales")
-        if weekly_view is not None and hasattr(
-            weekly_view, "set_navigation_visibility"
-        ):
-            weekly_view.set_navigation_visibility(self._sidebar_visible)
+        for view in self._section_frames.values():
+            if hasattr(view, "set_navigation_visibility"):
+                view.set_navigation_visibility(self._sidebar_visible)
 
     def show_section(self, section_key: str | None):
         """Show the requested report section, creating if needed.
@@ -241,6 +239,8 @@ class ReportsHubView(ctk.CTkFrame):
                 self.view_host,
                 controller=self.controller,
                 db_config=self.db_config,
+                on_toggle_navigation=self.toggle_navigation,
+                is_navigation_visible=self._sidebar_visible,
             )
         elif section_key == "customer_balances":
             return CustomerListReportView(

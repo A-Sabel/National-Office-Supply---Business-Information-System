@@ -14,6 +14,7 @@ import psycopg2
 
 from backend.audit_logger import ensure_audit_log_table
 from backend.report_service import ReportService
+from .csv_tab import export_audit_log
 
 BG_PAGE = "#f0f2f5"
 BG_CARD = "#ffffff"
@@ -62,6 +63,10 @@ class AuditLogReportView(ctk.CTkFrame):
         if self._nav_toggle_btn is not None:
             self._nav_toggle_btn.configure(text="◀" if visible else "▶")
 
+    def _handle_nav_toggle(self):
+        if self._on_toggle_navigation:
+            self._on_toggle_navigation()
+
     def _build_header(self):
         hdr = ctk.CTkFrame(
             self,
@@ -73,13 +78,30 @@ class AuditLogReportView(ctk.CTkFrame):
         hdr.grid(row=0, column=0, sticky="ew", padx=18, pady=(18, 10))
         hdr.grid_columnconfigure(0, weight=1)
 
-        title = ctk.CTkLabel(
-            hdr,
+        title_row = ctk.CTkFrame(hdr, fg_color="transparent")
+        title_row.grid(row=0, column=0, sticky="w", padx=16, pady=(12, 2))
+
+        self._nav_toggle_btn = ctk.CTkButton(
+            title_row,
+            text="◀" if self._is_navigation_visible else "▶",
+            width=30,
+            height=30,
+            corner_radius=8,
+            fg_color="#2f9e44",
+            hover_color="#2b8a3e",
+            text_color="white",
+            border_width=0,
+            font=("Segoe UI", 12, "bold"),
+            command=self._handle_nav_toggle,
+        )
+        self._nav_toggle_btn.pack(side="left", padx=(0, 10))
+
+        ctk.CTkLabel(
+            title_row,
             text="Audit Log",
             font=("Segoe UI", 22, "bold"),
             text_color=TEXT_DARK,
-        )
-        title.grid(row=0, column=0, sticky="w", padx=16, pady=(12, 2))
+        ).pack(side="left")
 
         subtitle = ctk.CTkLabel(
             hdr,
@@ -128,13 +150,28 @@ class AuditLogReportView(ctk.CTkFrame):
         to_entry.grid(row=0, column=3, sticky="ew", padx=4)
 
         ctk.CTkButton(
-            filter_row, text="Refresh", fg_color=ACCENT_BLUE, command=self._load_logs
+            filter_row, text="↺  Refresh",
+            width=110,
+            height=36,
+            corner_radius=8,
+            fg_color="transparent",
+            hover_color="#e8f4fd",
+            text_color=ACCENT_BLUE,
+            border_width=1,
+            border_color=ACCENT_BLUE,
+            font=("Segoe UI", 12, "bold"),
+            command=self._load_logs
         ).grid(row=0, column=4, padx=4)
         ctk.CTkButton(
             filter_row,
-            text="Export CSV",
-            fg_color=ACCENT_GREEN,
+            text="⬇  Export CSV",
+            width=140,
+            height=36,
+            font=("Segoe UI", 12, "bold"),
+            fg_color="#1e2d3d",
+            hover_color="#2d3f52",
             command=self._export_csv,
+            text_color="white",
         ).grid(row=0, column=5, padx=4)
 
     def _build_table(self):
@@ -252,22 +289,4 @@ class AuditLogReportView(ctk.CTkFrame):
             )
 
     def _export_csv(self):
-        if not self._rows:
-            messagebox.showinfo("Audit Log", "No rows to export.")
-            return
-        filepath = fd.asksaveasfilename(
-            defaultextension=".csv",
-            filetypes=[("CSV files", "*.csv")],
-            initialfile=f"audit_log_{datetime.now().strftime('%Y-%m-%d')}.csv",
-            title="Save Audit Log CSV",
-        )
-        if not filepath:
-            return
-        try:
-            with open(filepath, "w", newline="", encoding="utf-8") as f:
-                writer = csv.DictWriter(f, fieldnames=self._rows[0].keys())
-                writer.writeheader()
-                writer.writerows(self._rows)
-            messagebox.showinfo("Audit Log", f"Exported audit logs to:\n{filepath}")
-        except Exception as e:
-            messagebox.showerror("Audit Log", f"Could not export CSV:\n{e}")
+        export_audit_log(self, self._rows)

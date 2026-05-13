@@ -4,11 +4,15 @@ frontend/tabs/reports_tab/backlog_report.py
 Backlog Tracking Report: Ordered parts not yet shipped (QD-Sec10)
 """
 
+import csv
 import customtkinter as ctk
 import tkinter as tk
+import tkinter.filedialog as fd
 from tkinter import ttk, messagebox
 import datetime
 from typing import TypedDict, Optional, List, Dict
+
+from .csv_tab import export_backlog
 
 try:
     import psycopg2
@@ -32,7 +36,7 @@ ACCENT_BLUE = "#3b82f6"
 
 FONT_TITLE = ("Segoe UI", 26, "bold")
 FONT_BODY = ("Segoe UI", 11)
-FONT_BTN = ("Segoe UI", 11, "bold")
+FONT_BTN = ("Segoe UI", 12, "bold")
 FONT_TBL_HDR = ("Segoe UI", 11, "bold")
 FONT_TBL_ROW = ("Segoe UI", 11)
 
@@ -144,6 +148,21 @@ class BacklogReportView(ctk.CTkFrame):
         title_row = tk.Frame(body, bg=PAGE_BG)
         title_row.pack(fill="x", padx=pad_x, pady=(8, 0))
 
+        self._nav_toggle_btn = ctk.CTkButton(
+            title_row,
+            text="◀" if self._is_navigation_visible else "▶",
+            width=30,
+            height=30,
+            corner_radius=8,
+            fg_color="#2f9e44",
+            hover_color="#2b8a3e",
+            text_color=TEXT_WHITE,
+            border_width=0,
+            font=("Segoe UI", 12, "bold"),
+            command=self._handle_nav_toggle,
+        )
+        self._nav_toggle_btn.pack(side="left", padx=(0, 10))
+
         tk.Label(
             title_row,
             text="Backlog Tracking",
@@ -157,16 +176,31 @@ class BacklogReportView(ctk.CTkFrame):
 
         ctk.CTkButton(
             btn_frame,
-            text="\u27f3  Refresh",
-            width=100,
-            height=32,
+            text="↺  Refresh",
+            width=110,
+            height=36,
             font=FONT_BTN,
-            corner_radius=7,
+            corner_radius=8,
+            fg_color="transparent",
+            hover_color="#e8f4fd",
+            text_color=ACCENT_BLUE,
+            border_width=1,
+            border_color=ACCENT_BLUE,
+            command=self._load_data,
+        ).pack(side="left", padx=(0, 8))
+
+        ctk.CTkButton(
+            btn_frame,
+            text="⬇  Export CSV",
+            width=140,
+            height=36,
+            font=FONT_BTN,
+            corner_radius=8,
             fg_color="#1e2d3d",
             hover_color="#2d3f52",
             text_color=TEXT_WHITE,
-            command=self._load_data,
-        ).pack(side="left", padx=(0, 8))
+            command=self._export_csv,
+        ).pack(side="left")
 
         # Subtitle
         self._subtitle_lbl = tk.Label(
@@ -323,6 +357,15 @@ class BacklogReportView(ctk.CTkFrame):
         self._tree.pack(fill="x", padx=0, pady=0)
         xsb.pack(fill="x")
 
+    def set_navigation_visibility(self, visible: bool):
+        self._is_navigation_visible = visible
+        if hasattr(self, "_nav_toggle_btn"):
+            self._nav_toggle_btn.configure(text="◀" if visible else "▶")
+
+    def _handle_nav_toggle(self):
+        if self._on_toggle_navigation:
+            self._on_toggle_navigation()
+
     def _load_data(self):
         """Load backlog data from database."""
         rows = self._fetch_from_db() or SAMPLE_BACKLOG[:]
@@ -406,6 +449,10 @@ class BacklogReportView(ctk.CTkFrame):
         self._total_orders_lbl.configure(text=str(unique_orders))
         self._total_lines_lbl.configure(text=str(total_lines))
         self._total_qty_lbl.configure(text=str(total_qty))
+
+    def _export_csv(self):
+        rows = [self._tree.item(iid, "values") for iid in self._tree.get_children()]
+        export_backlog(self, rows)
 
     def _on_filter_change(self, *args):
         """Called when filter text changes."""
