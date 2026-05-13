@@ -201,19 +201,20 @@ class InventorySalesReportView(ctk.CTkFrame):
             result = {}
             rows = self._report_service.execute_query("""
                 SELECT p.part_number,
-                       s.company_name,
-                       s.phone_number,
-                       ip.cost
+                    s.company_name,
+                    s.phone_number,
+                    ip.cost
                 FROM   parts p
                 JOIN   item_parts ip ON ip.part_number = p.part_number
-                JOIN   suppliers s ON s.supplier_id = ip.supplier_id
-                WHERE  p.stock_count <= p.trigger_amount
+                JOIN   suppliers s  ON s.supplier_id  = ip.supplier_id
                 ORDER  BY p.part_number, ip.cost ASC
             """)
             for row in rows:
-                result.setdefault(self._part_label(row["part_number"]), []).append(
+                key = self._part_label(row["part_number"])
+                result.setdefault(key, []).append(
                     (row["company_name"], float(row["cost"]), row["phone_number"])
                 )
+            # Only fall back to sample if DB itself is empty of any supplier links
             return result if result else dict(self._SAMPLE_SUPPLIERS)
         except Exception as e:
             print(f"[Inventory] _load_suppliers failed: {e}")
@@ -224,27 +225,30 @@ class InventorySalesReportView(ctk.CTkFrame):
             return None
         try:
             rows = self._report_service.execute_query("""
-                    SELECT p.part_number,
-                           p.description,
-                           p.stock_count,
-                           p.trigger_amount,
-                           EXISTS (
-                               SELECT 1
-                               FROM   purchase_orders po
-                               WHERE  po.part_number = p.part_number
-                               AND    COALESCE(po.received, FALSE) = FALSE
-                           ) AS on_order,
-                           EXISTS (
-                               SELECT 1
-                               FROM   invoice_lines il
-                               JOIN   invoices i ON i.invoice_id = il.invoice_id
-                               WHERE  il.part_number = p.part_number
-                               AND    COALESCE(i.status, '') NOT IN ('shipped', 'paid')
-                           ) AS has_unshipped
-                    FROM parts p
-                    WHERE p.stock_count <= p.trigger_amount
-                    ORDER BY p.part_number
-                """)
+                SELECT
+                    p.part_number,
+                    p.description,
+                    p.stock_count,
+                    p.trigger_amount,
+                    EXISTS (
+                        SELECT 1
+                        FROM   purchase_orders po
+                        WHERE  po.part_number = p.part_number
+                        AND    po.received = FALSE
+                    ) AS on_order,
+                    EXISTS (
+                        SELECT 1
+                        FROM   invoice_lines il
+                        JOIN   invoices i ON i.invoice_id = il.invoice_id
+                        WHERE  il.part_number = p.part_number
+                        AND    i.status = 'active'
+                    ) AS has_unshipped
+                FROM parts p
+                WHERE p.stock_count <= p.trigger_amount
+                ORDER BY p.stock_count ASC, p.part_number
+            """)
+            if not rows:
+                return []          # ← empty list, NOT None — forces the DB branch
             return [
                 (
                     self._part_label(row["part_number"]),
@@ -258,7 +262,7 @@ class InventorySalesReportView(ctk.CTkFrame):
             ]
         except Exception as e:
             print(f"[Inventory] _load_reorder failed: {e}")
-            return None
+            return None     
 
     # ==================================================================
     # Header
@@ -611,16 +615,18 @@ class InventorySalesReportView(ctk.CTkFrame):
         tree.delete(*tree.get_children())
         db_rows = self._load_reorder()
 
-        if db_rows is not None:
+        if db_rows is not None:                    # DB path (includes empty list)
             for part_no, desc, stock, trigger, on_order, has_unshipped in db_rows:
+                # QD-Sec 3/4/5 action logic
                 if stock == 0 and not on_order:
                     action, tag = "🚨 Urgent – Reorder NOW", "urgent"
                 elif stock == 0 and on_order:
                     action, tag = "⏳ Order Pending", "low"
-                elif not on_order:
+                elif stock <= trigger and not on_order:
                     action, tag = "📦 Place Reorder", "low"
-                else:
+                else:                              # low stock but order already placed
                     action, tag = "⏳ Order Pending", "low"
+
                 tree.insert(
                     "",
                     "end",
@@ -630,12 +636,23 @@ class InventorySalesReportView(ctk.CTkFrame):
                         stock,
                         trigger,
                         "Yes" if on_order else "No",
-                        "Yes" if has_unshipped else "No",
+                        # QD-Sec5: only flag unshipped if there's no open PO
+                        "⚠️ Yes" if (has_unshipped and not on_order) else (
+                            "Yes" if has_unshipped else "No"
+                        ),
                         action,
                     ),
                     tags=(tag,),
                 )
-        else:
+
+            if not db_rows:
+                tree.insert(
+                    "", "end",
+                    values=("—", "No parts at or below trigger level", "", "", "", "", ""),
+                    tags=("low",),
+                )
+
+        else:                                      # fallback to sample data
             for p in [p for p in self.parts if p[3] <= p[4]]:
                 part_no, desc, _, stock, trigger, on_order, _ = p
                 unshipped = "Yes" if (stock <= 1 and not on_order) else "No"
@@ -648,17 +665,60 @@ class InventorySalesReportView(ctk.CTkFrame):
                 tree.insert(
                     "",
                     "end",
-                    values=(
-                        part_no,
-                        desc,
-                        stock,
-                        trigger,
-                        "Yes" if on_order else "No",
-                        unshipped,
-                        action,
-                    ),
+                    values=(part_no, desc, stock, trigger,
+                            "Yes" if on_order else "No", unshipped, action),
                     tags=(tag,),
                 )
+
+    def _build_reorder_tab(self, parent) -> ctk.CTkFrame:
+        frame = ctk.CTkFrame(
+            parent, fg_color=BG_CARD, corner_radius=10,
+            border_width=1, border_color=BORDER,
+        )
+        frame.columnconfigure(0, weight=1)
+
+        # ── legend + refresh row ──────────────────────────────────────────
+        legend_row = ctk.CTkFrame(frame, fg_color="transparent")
+        legend_row.grid(row=0, column=0, sticky="ew", padx=16, pady=(14, 4))
+        legend_row.columnconfigure(0, weight=1)
+
+        legend = ctk.CTkFrame(legend_row, fg_color="#fef9e7", corner_radius=8)
+        legend.grid(row=0, column=0, sticky="ew")
+        ctk.CTkLabel(
+            legend,
+            text="⚠️  Parts at or below trigger quantity.  Bold red = out of stock.  QD-Sec 3 / 4 / 5",
+            font=FONT_SMALL,
+            text_color="#7d6608",
+        ).pack(anchor="w", padx=10, pady=6)
+
+        ctk.CTkButton(
+            legend_row,
+            text="↻ Refresh",
+            width=90,
+            height=30,
+            corner_radius=6,
+            fg_color="#f3f5f8",
+            text_color=TEXT_DARK,
+            hover_color=BORDER,
+            font=FONT_SMALL,
+            command=self._populate_reorder,       # re-queries live DB on click
+        ).grid(row=0, column=1, padx=(10, 0))
+
+        cols = (
+            "Part No.", "Description", "In Stock",
+            "Trigger", "On Order?", "Has Unshipped Orders", "Action Required",
+        )
+        widths = (90, 220, 80, 70, 90, 150, 160)
+
+        self._reorder_tree = self._make_treeview(frame, cols, widths, row=1)
+        self._reorder_tree.tag_configure(
+            "urgent", foreground=ACCENT_RED, font=("Segoe UI", 11, "bold")
+        )
+        self._reorder_tree.tag_configure(
+            "low", foreground="#b7950b", font=("Segoe UI", 11)
+        )
+        self._populate_reorder()
+        return frame
 
     # ==================================================================
     # TAB 3 — Supplier Sourcing
@@ -702,17 +762,41 @@ class InventorySalesReportView(ctk.CTkFrame):
     def _populate_supplier(self):
         tree = self._supplier_tree
         tree.delete(*tree.get_children())
-        for part in [p for p in self.parts if p[3] <= p[4]]:
+
+        # Determine which parts are currently low-stock for display filtering
+        low_stock_parts = [p for p in self.parts if p[3] <= p[4]]
+
+        if not low_stock_parts:
+            tree.insert(
+                "", "end",
+                values=("—", "No parts currently at or below trigger level", "", "", "", ""),
+                tags=("cheapest",),
+            )
+            return
+
+        rows_inserted = 0
+        for part in low_stock_parts:
             part_no, desc = part[0], part[1]
-            for i, (name, cost, phone) in enumerate(
-                sorted(self.suppliers.get(part_no, []), key=lambda s: s[1])
-            ):
+            supplier_list = sorted(
+                self.suppliers.get(part_no, []), key=lambda s: s[1]
+            )
+
+            if not supplier_list:
+                # Part is low-stock but has no suppliers linked — show it anyway
                 tree.insert(
-                    "",
-                    "end",
+                    "", "end",
+                    values=(part_no, desc, "⚠ No supplier linked", "—", "—", "—"),
+                    tags=(),
+                )
+                rows_inserted += 1
+                continue
+
+            for i, (name, cost, phone) in enumerate(supplier_list):
+                tree.insert(
+                    "", "end",
                     values=(
                         part_no if i == 0 else "",
-                        desc if i == 0 else "",
+                        desc   if i == 0 else "",
                         name,
                         f"₱{cost:.2f}",
                         phone,
@@ -720,6 +804,64 @@ class InventorySalesReportView(ctk.CTkFrame):
                     ),
                     tags=("cheapest",) if i == 0 else (),
                 )
+                rows_inserted += 1
+
+        if rows_inserted == 0:
+            tree.insert(
+                "", "end",
+                values=("—", "No supplier data found for low-stock parts", "", "", "", ""),
+                tags=("cheapest",),
+            )
+
+    def _build_supplier_tab(self, parent) -> ctk.CTkFrame:
+        frame = ctk.CTkFrame(
+            parent, fg_color=BG_CARD, corner_radius=10,
+            border_width=1, border_color=BORDER,
+        )
+        frame.columnconfigure(0, weight=1)
+
+        note_row = ctk.CTkFrame(frame, fg_color="transparent")
+        note_row.grid(row=0, column=0, sticky="ew", padx=16, pady=(14, 4))
+        note_row.columnconfigure(0, weight=1)
+
+        note = ctk.CTkFrame(note_row, fg_color="#eaf4fb", corner_radius=8)
+        note.grid(row=0, column=0, sticky="ew")
+        ctk.CTkLabel(
+            note,
+            text="🏭  Suppliers for low-stock parts — sorted cheapest first.  QD-Sec 6",
+            font=FONT_SMALL,
+            text_color="#1a5276",
+        ).pack(anchor="w", padx=10, pady=6)
+
+        def _refresh_supplier_tab():
+            self.suppliers = self._load_suppliers()
+            self._populate_supplier()
+
+        ctk.CTkButton(
+            note_row,
+            text="↻ Refresh",
+            width=90,
+            height=30,
+            corner_radius=6,
+            fg_color="#f3f5f8",
+            text_color=TEXT_DARK,
+            hover_color=BORDER,
+            font=FONT_SMALL,
+            command=_refresh_supplier_tab,
+        ).grid(row=0, column=1, padx=(10, 0))
+
+        cols = (
+            "Part No.", "Description", "Supplier Name",
+            "Unit Cost", "Phone", "Best Price?",
+        )
+        widths = (90, 200, 180, 90, 140, 100)
+
+        self._supplier_tree = self._make_treeview(frame, cols, widths, row=1)
+        self._supplier_tree.tag_configure(
+            "cheapest", foreground="#1e8449", font=("Segoe UI", 11, "bold")
+        )
+        self._populate_supplier()
+        return frame
 
     # ==================================================================
     # Shared treeview factory
