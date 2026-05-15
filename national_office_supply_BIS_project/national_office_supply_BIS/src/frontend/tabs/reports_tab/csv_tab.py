@@ -57,19 +57,21 @@ import tkinter.messagebox as messagebox
 from typing import Callable, Sequence
 
 import customtkinter as ctk
+from frontend.modular.date_picker import DatePickerField
 
 # ── palette (matches the rest of the app) ────────────────────────────────────
-BG_PAGE   = "#f0f2f5"
-BG_CARD   = "#ffffff"
-BORDER    = "#e0e0e0"
+BG_PAGE = "#f0f2f5"
+BG_CARD = "#ffffff"
+BORDER = "#e0e0e0"
 TEXT_DARK = "#2c3e50"
 TEXT_MUTED = "#7f8c8d"
-ACCENT_BLUE  = "#3498db"
+ACCENT_BLUE = "#3498db"
 ACCENT_GREEN = "#2ecc71"
-BRAND_NAVY   = "#001f5b"
+BRAND_NAVY = "#001f5b"
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
+
 
 def _parse_date(value) -> datetime.date | None:
     """Try to coerce *value* to a date.  Returns None on failure."""
@@ -107,33 +109,35 @@ def _row_values(row) -> list:
 
 # ── main public function ──────────────────────────────────────────────────────
 
+
 def open_export_dialog(
     parent,
-    title:          str,
-    default_name:   str,
-    headers:        list[str],
-    rows:           list,
+    title: str,
+    default_name: str,
+    headers: list[str],
+    rows: list,
     date_col_index: int | None = None,
-    date_label:     str = "Date",
-    dict_date_key:  str | None = None,
+    date_label: str = "Date",
+    dict_date_key: str | None = None,
 ) -> None:
     """Open a modal date-range export dialog."""
 
     dialog = _ExportDialog(
-        parent         = parent,
-        report_title   = title,
-        default_name   = default_name,
-        headers        = headers,
-        rows           = rows,
-        date_col_index = date_col_index,
-        date_label     = date_label,
-        dict_date_key  = dict_date_key,
+        parent=parent,
+        report_title=title,
+        default_name=default_name,
+        headers=headers,
+        rows=rows,
+        date_col_index=date_col_index,
+        date_label=date_label,
+        dict_date_key=dict_date_key,
     )
-    dialog.grab_set()   # modal
+    dialog.grab_set()  # modal
     parent.wait_window(dialog)
 
 
 # ── dialog class ─────────────────────────────────────────────────────────────
+
 
 class _ExportDialog(ctk.CTkToplevel):
     """Internal modal window — use open_export_dialog() instead."""
@@ -141,12 +145,12 @@ class _ExportDialog(ctk.CTkToplevel):
     def __init__(
         self,
         parent,
-        report_title:  str,
-        default_name:  str,
-        headers:       list[str],
-        rows:          list,
+        report_title: str,
+        default_name: str,
+        headers: list[str],
+        rows: list,
         date_col_index: int | None,
-        date_label:    str,
+        date_label: str,
         dict_date_key: str | None,
     ):
         super().__init__(parent)
@@ -154,12 +158,12 @@ class _ExportDialog(ctk.CTkToplevel):
         self.resizable(False, False)
         self.configure(fg_color=BG_PAGE)
 
-        self._report_title  = report_title
-        self._default_name  = default_name
-        self._headers       = headers
-        self._rows          = rows
-        self._date_col_idx  = date_col_index
-        self._date_label    = date_label
+        self._report_title = report_title
+        self._default_name = default_name
+        self._headers = headers
+        self._rows = rows
+        self._date_col_idx = date_col_index
+        self._date_label = date_label
         self._dict_date_key = dict_date_key
 
         self._has_date_filter = date_col_index is not None or dict_date_key is not None
@@ -210,30 +214,26 @@ class _ExportDialog(ctk.CTkToplevel):
                 text_color=TEXT_DARK,
             ).grid(row=0, column=0, columnspan=2, sticky="w", padx=14, pady=(12, 6))
 
-            ctk.CTkLabel(
-                card, text="From (YYYY-MM-DD)",
-                font=("Segoe UI", 11), text_color=TEXT_MUTED,
-            ).grid(row=1, column=0, sticky="w", padx=14, pady=(0, 2))
-            ctk.CTkLabel(
-                card, text="To (YYYY-MM-DD)",
-                font=("Segoe UI", 11), text_color=TEXT_MUTED,
-            ).grid(row=1, column=1, sticky="w", padx=14, pady=(0, 2))
-
-            self._from_var = ctk.StringVar()
-            self._to_var   = ctk.StringVar()
-
-            ctk.CTkEntry(
+            self._from_picker = DatePickerField(
                 card,
-                textvariable=self._from_var,
-                placeholder_text="e.g. 2024-01-01",
-                height=36,
-            ).grid(row=2, column=0, sticky="ew", padx=(14, 6), pady=(0, 14))
-            ctk.CTkEntry(
+                label="From",
+                width=160,
+            )
+            self._from_picker.grid(
+                row=1, column=0, sticky="ew", padx=(14, 6), pady=(0, 14)
+            )
+
+            self._to_picker = DatePickerField(
                 card,
-                textvariable=self._to_var,
-                placeholder_text="e.g. 2024-12-31",
-                height=36,
-            ).grid(row=2, column=1, sticky="ew", padx=(6, 14), pady=(0, 14))
+                label="To",
+                width=160,
+            )
+            self._to_picker.grid(
+                row=1, column=1, sticky="ew", padx=(6, 14), pady=(0, 14)
+            )
+
+            self._from_var = self._from_picker.variable
+            self._to_var = self._to_picker.variable
 
             ctk.CTkLabel(
                 card,
@@ -245,7 +245,7 @@ class _ExportDialog(ctk.CTkToplevel):
         else:
             # No date column available — just confirm
             self._from_var = ctk.StringVar()
-            self._to_var   = ctk.StringVar()
+            self._to_var = ctk.StringVar()
             ctk.CTkLabel(
                 card,
                 text="ℹ  This report has no date column — all visible rows will be exported.",
@@ -257,7 +257,9 @@ class _ExportDialog(ctk.CTkToplevel):
         # ── sort note ──────────────────────────────────────────────────────────
         if self._has_date_filter:
             sort_note = ctk.CTkFrame(
-                self, fg_color="#eaf4fb", corner_radius=8,
+                self,
+                fg_color="#eaf4fb",
+                corner_radius=8,
             )
             sort_note.pack(fill="x", padx=24, pady=(0, 16))
             ctk.CTkLabel(
@@ -278,7 +280,7 @@ class _ExportDialog(ctk.CTkToplevel):
 
         if self._has_date_filter:
             self._from_var.trace_add("write", lambda *_: self._update_preview())
-            self._to_var.trace_add("write",   lambda *_: self._update_preview())
+            self._to_var.trace_add("write", lambda *_: self._update_preview())
 
         # ── buttons ───────────────────────────────────────────────────────────
         btn_row = ctk.CTkFrame(self, fg_color="transparent")
@@ -316,8 +318,12 @@ class _ExportDialog(ctk.CTkToplevel):
 
     def _filtered_rows(self) -> list:
         """Return rows matching the chosen date range, sorted by date asc."""
-        from_date = _parse_date(self._from_var.get().strip()) if self._has_date_filter else None
-        to_date   = _parse_date(self._to_var.get().strip())   if self._has_date_filter else None
+        from_date = (
+            _parse_date(self._from_var.get().strip()) if self._has_date_filter else None
+        )
+        to_date = (
+            _parse_date(self._to_var.get().strip()) if self._has_date_filter else None
+        )
 
         result = []
         for row in self._rows:
@@ -331,6 +337,7 @@ class _ExportDialog(ctk.CTkToplevel):
 
         # sort by date column ascending (rows without dates go to the end)
         if self._has_date_filter:
+
             def _sort_key(row):
                 d = _get_date_from_row(row, self._date_col_idx, self._dict_date_key)
                 return d or datetime.date.max
@@ -395,108 +402,136 @@ class _ExportDialog(ctk.CTkToplevel):
 
 # ── convenience wrappers (one per report) ─────────────────────────────────────
 
+
 def export_weekly_sales(parent, rows: list):
     """Weekly Sales — date field: 'Week Ending' (index 8)."""
     open_export_dialog(
-        parent        = parent,
-        title         = "Weekly Sales Report",
-        default_name  = "weekly_sales",
-        headers       = [
-            "Rep ID", "Rep Name", "Total Sales", "# Invoices",
-            "Largest Sale", "Avg Sale", "# Customers", "Commission", "Week Ending",
+        parent=parent,
+        title="Weekly Sales Report",
+        default_name="weekly_sales",
+        headers=[
+            "Rep ID",
+            "Rep Name",
+            "Total Sales",
+            "# Invoices",
+            "Largest Sale",
+            "Avg Sale",
+            "# Customers",
+            "Commission",
+            "Week Ending",
         ],
-        rows          = rows,
-        date_col_index = 8,
-        date_label    = "Week Ending",
+        rows=rows,
+        date_col_index=8,
+        date_label="Week Ending",
     )
 
 
 def export_inventory(parent, rows: list):
     """Inventory Report — no date column; exports all visible rows."""
     open_export_dialog(
-        parent        = parent,
-        title         = "Inventory Report",
-        default_name  = "inventory_report",
-        headers       = [
-            "Part No.", "Description", "Sell Price",
-            "In Stock", "Trigger", "On Order", "Status",
+        parent=parent,
+        title="Inventory Report",
+        default_name="inventory_report",
+        headers=[
+            "Part No.",
+            "Description",
+            "Sell Price",
+            "In Stock",
+            "Trigger",
+            "On Order",
+            "Status",
         ],
-        rows          = rows,
-        date_col_index = None,
-        date_label    = "",
+        rows=rows,
+        date_col_index=None,
+        date_label="",
     )
 
 
 def export_stock_ordering(parent, rows: list, headers: list[str]):
     """Stock Ordering Report — no date column; exports all visible rows."""
     open_export_dialog(
-        parent        = parent,
-        title         = "Stock Ordering Report",
-        default_name  = "stock_ordering",
-        headers       = headers,
-        rows          = rows,
-        date_col_index = None,
-        date_label    = "",
+        parent=parent,
+        title="Stock Ordering Report",
+        default_name="stock_ordering",
+        headers=headers,
+        rows=rows,
+        date_col_index=None,
+        date_label="",
     )
 
 
 def export_backlog(parent, rows: list):
     """Backlog Report — date field: 'Order Date' (index 1)."""
     open_export_dialog(
-        parent        = parent,
-        title         = "Backlog Report",
-        default_name  = "backlog_report",
-        headers       = [
-            "Invoice", "Order Date", "Cust #",
-            "Company", "Part", "Description", "Qty", "Status",
+        parent=parent,
+        title="Backlog Report",
+        default_name="backlog_report",
+        headers=[
+            "Invoice",
+            "Order Date",
+            "Cust #",
+            "Company",
+            "Part",
+            "Description",
+            "Qty",
+            "Status",
         ],
-        rows          = rows,
-        date_col_index = 1,
-        date_label    = "Order Date",
+        rows=rows,
+        date_col_index=1,
+        date_label="Order Date",
     )
 
 
 def export_customer_balances(parent, rows: list):
     """Customer List & Balances — no date column."""
     open_export_dialog(
-        parent        = parent,
-        title         = "Customer List & Balances",
-        default_name  = "customer_list",
-        headers       = [
-            "Cust. No.", "Company", "Address",
-            "Phone", "Current Balance", "Status",
+        parent=parent,
+        title="Customer List & Balances",
+        default_name="customer_list",
+        headers=[
+            "Cust. No.",
+            "Company",
+            "Address",
+            "Phone",
+            "Current Balance",
+            "Status",
         ],
-        rows          = rows,
-        date_col_index = None,
-        date_label    = "",
+        rows=rows,
+        date_col_index=None,
+        date_label="",
     )
 
 
 def export_customer_payments(parent, rows: list, headers: list[str]):
     """Customer Payment History — date field: 'Payment Date' (index 3)."""
     open_export_dialog(
-        parent        = parent,
-        title         = "Customer Payment History",
-        default_name  = "payment_history",
-        headers       = headers,
-        rows          = rows,
-        date_col_index = 3,
-        date_label    = "Payment Date",
+        parent=parent,
+        title="Customer Payment History",
+        default_name="payment_history",
+        headers=headers,
+        rows=rows,
+        date_col_index=3,
+        date_label="Payment Date",
     )
 
 
 def export_audit_log(parent, rows: list[dict]):
     """Audit Log — date field: 'timestamp' dict key."""
     open_export_dialog(
-        parent        = parent,
-        title         = "Audit Log",
-        default_name  = "audit_log",
-        headers       = [
-            "Log ID", "Timestamp", "Action", "Actor",
-            "Target Table", "Target ID", "Details",
+        parent=parent,
+        title="Audit Log",
+        default_name="audit_log",
+        headers=[
+            "Log ID",
+            "Timestamp",
+            "Action",
+            "Actor",
+            "Target Table",
+            "Target ID",
+            "Details",
         ],
-        rows          = rows,
-        date_col_index = None,
-        dict_date_key  = "timestamp",
-        date_label    = "Timestamp",
+        rows=rows,
+        date_col_index=None,
+        dict_date_key="timestamp",
+        date_label="Timestamp",
     )

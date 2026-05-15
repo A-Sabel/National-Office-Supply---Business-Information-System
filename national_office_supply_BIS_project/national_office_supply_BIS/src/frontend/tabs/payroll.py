@@ -5,6 +5,7 @@ from datetime import datetime, date, timedelta
 from backend.employee_service import EmployeeService
 from backend.audit_logger import write_audit_log
 from backend.timecard_service import TimecardService
+from frontend.modular.date_picker import DatePickerField
 
 try:
     import psycopg2
@@ -391,7 +392,8 @@ class _WorkerFilesPanel(ctk.CTkFrame):
         q = self._search_var.get().lower()
         role = self._role_filter.get()
         data = [
-            r for r in self._all_rows
+            r
+            for r in self._all_rows
             if (role == "All" or str(r[2]).lower() == role.lower())
             and (not q or any(q in str(v).lower() for v in r[:5]))
         ]
@@ -456,7 +458,9 @@ class _AuditPanel(ctk.CTkFrame):
         self.grid_rowconfigure(1, weight=1)
 
         today = date.today()
-        self._week = today - timedelta(days=today.weekday()) + timedelta(days=5)  # current Saturday
+        self._week = (
+            today - timedelta(days=today.weekday()) + timedelta(days=5)
+        )  # current Saturday
 
         # ── week banner ───────────────────────────────────────────────────────
         banner = ctk.CTkFrame(
@@ -484,21 +488,14 @@ class _AuditPanel(ctk.CTkFrame):
             picker_frame, text="Week of:", font=("Segoe UI", 11), text_color="#7f8c8d"
         ).pack(side="left", padx=(0, 6))
 
-        self._picker_var = ctk.StringVar(value=self._week.strftime("%Y-%m-%d"))        
-        picker_entry = ctk.CTkEntry(
+        self._picker_field = DatePickerField(
             picker_frame,
-            textvariable=self._picker_var,
+            default_date=self._week,
             width=110,
-            height=28,
-            font=("Segoe UI", 11),
-            fg_color="#f0f4f8",
-            border_color="#d0d7de",
-            border_width=1,
-            text_color="#2c3e50",
-            placeholder_text="YYYY-MM-DD",
+            on_change=lambda _date: self._on_week_change(),
         )
-        picker_entry.pack(side="left", padx=(0, 6))
-        picker_entry.bind("<Return>", lambda _e: self._on_week_change())
+        self._picker_field.pack(side="left", padx=(0, 6))
+        self._picker_var = self._picker_field.variable
 
         ctk.CTkButton(
             picker_frame,
@@ -590,15 +587,23 @@ class _AuditPanel(ctk.CTkFrame):
             self._missing_tree.heading(col, text=col)
             self._missing_tree.column(col, width=w, anchor=anc, stretch=True)  # type: ignore[arg-type]
 
-        self._missing_tree.tag_configure("even", background="#fff8f8", foreground="#2c3e50")
-        self._missing_tree.tag_configure("odd", background="#fdecea", foreground="#2c3e50")
+        self._missing_tree.tag_configure(
+            "even", background="#fff8f8", foreground="#2c3e50"
+        )
+        self._missing_tree.tag_configure(
+            "odd", background="#fdecea", foreground="#2c3e50"
+        )
 
         _make_sortable(self._missing_tree, miss_cols, numeric_cols={"Emp #"})
 
-        miss_vsb = ttk.Scrollbar(self._left_card, orient="vertical", command=self._missing_tree.yview)
+        miss_vsb = ttk.Scrollbar(
+            self._left_card, orient="vertical", command=self._missing_tree.yview
+        )
         self._missing_tree.configure(yscrollcommand=miss_vsb.set)
         miss_vsb.grid(row=1, column=1, sticky="ns", padx=(0, 6), pady=(0, 8))
-        self._missing_tree.grid(row=1, column=0, sticky="nsew", padx=(8, 0), pady=(0, 8))
+        self._missing_tree.grid(
+            row=1, column=0, sticky="nsew", padx=(8, 0), pady=(0, 8)
+        )
         self._left_card.grid_rowconfigure(1, weight=1)
 
         # ── RIGHT — totals + buttons (sticky) ────────────────────────────────
@@ -760,7 +765,13 @@ class _AuditPanel(ctk.CTkFrame):
 
         _make_sortable(
             self._comm_tree,
-            ("Emp #", "Sales Representative", "Invoices", "Total Sales", "Commission (5%)"),
+            (
+                "Emp #",
+                "Sales Representative",
+                "Invoices",
+                "Total Sales",
+                "Commission (5%)",
+            ),
             numeric_cols={"Emp #", "Invoices"},
             currency_cols={"Total Sales", "Commission (5%)"},
         )
@@ -797,12 +808,14 @@ class _AuditPanel(ctk.CTkFrame):
 
         self._pay_week_lbl = ctk.CTkLabel(
             pay_card,
-            text=f"Weekly Payroll Check File  (Week of {self._week.strftime('%b %d, %Y')})", #qdsec2
+            text=f"Weekly Payroll Check File  (Week of {self._week.strftime('%b %d, %Y')})",  # qdsec2
             font=("Segoe UI", 13, "bold"),
             text_color="#2c3e50",
         )
         pay_card.grid_rowconfigure(1, weight=1)
-        self._pay_week_lbl.grid(row=0, column=0, columnspan=2, sticky="w", padx=16, pady=(14, 6))
+        self._pay_week_lbl.grid(
+            row=0, column=0, columnspan=2, sticky="w", padx=16, pady=(14, 6)
+        )
 
         style3 = ttk.Style()
         style3.configure(
@@ -870,7 +883,7 @@ class _AuditPanel(ctk.CTkFrame):
 
     def _on_week_change(self):
         """Parse the date-picker entry, snap to Monday, reload the panel."""
-        raw = self._picker_var.get().strip()
+        raw = self._picker_field.get_value().strip()
         try:
             picked = datetime.strptime(raw, "%Y-%m-%d").date()
         except ValueError:
@@ -885,13 +898,13 @@ class _AuditPanel(ctk.CTkFrame):
                 "Future Date",
                 "You cannot select a future date.\nPlease pick today or an earlier date.",
             )
-            self._picker_var.set(self._week.strftime("%Y-%m-%d"))
+            self._picker_field.set_date(self._week)
             return
         # Snap to Monday of the chosen week
         monday = picked - timedelta(days=picked.weekday())
         self._week = monday
         # Update the picker entry to the snapped Monday
-        self._picker_var.set(monday.strftime("%Y-%m-%d"))
+        self._picker_field.set_date(monday)
         # Update the range label
         sun = monday + timedelta(days=6)
         self._week_lbl.configure(
@@ -995,9 +1008,9 @@ class _AuditPanel(ctk.CTkFrame):
         """Load this week's sales rep commission data."""
         for iid in self._comm_tree.get_children():
             self._comm_tree.delete(iid)
-            
+
         self._comm_week_lbl.configure(
-        text=f"Sales Representative Commissions (Week of {self._week.strftime('%b %d, %Y')})"
+            text=f"Sales Representative Commissions (Week of {self._week.strftime('%b %d, %Y')})"
         )
 
         try:
@@ -1056,7 +1069,8 @@ class _AuditPanel(ctk.CTkFrame):
         for iid in self._comm_tree.get_children():
             self._comm_tree.delete(iid)
         filtered = [
-            row for row in self._comm_all_rows
+            row
+            for row in self._comm_all_rows
             if status_filter == "All" or row[5] == status_filter
         ]
         for idx, vals in enumerate(filtered):
@@ -1967,7 +1981,14 @@ class _ManagerTimecardOverviewPanel(ctk.CTkFrame):
             foreground=[("selected", "#1a252f")],
         )
 
-        cols = ("Emp #", "Employee Name", "Week Starting", "Hours Worked", "Gross Pay", "Status")
+        cols = (
+            "Emp #",
+            "Employee Name",
+            "Week Starting",
+            "Hours Worked",
+            "Gross Pay",
+            "Status",
+        )
         self._tree = ttk.Treeview(
             card, columns=cols, show="headings", height=10, style="MTC.Treeview"
         )
@@ -2027,7 +2048,7 @@ class _ManagerTimecardOverviewPanel(ctk.CTkFrame):
                 ORDER  BY t.week_date DESC, e.employee_name
                 LIMIT  50
                 """,
-                )
+            )
             rows = cur.fetchall()
             cur.close()
             conn.close()
@@ -2054,7 +2075,8 @@ class _ManagerTimecardOverviewPanel(ctk.CTkFrame):
         for iid in self._tree.get_children():
             self._tree.delete(iid)
         filtered = [
-            row for row in self._tc_all_rows
+            row
+            for row in self._tc_all_rows
             if status_filter == "All" or row[5] == status_filter
         ]
         for idx, vals in enumerate(filtered):
@@ -2185,7 +2207,9 @@ class _PayrollHistoryPanel(ctk.CTkFrame):
             self._tree.heading(col, text=col)
             self._tree.column(col, width=w, anchor=anc, stretch=stretch)  # type: ignore[arg-type]
 
-        _make_sortable(self._tree, cols, numeric_cols={"Emp #"}, currency_cols={"Amount"})
+        _make_sortable(
+            self._tree, cols, numeric_cols={"Emp #"}, currency_cols={"Amount"}
+        )
 
         self._tree.tag_configure("even", background="#ffffff", foreground="#2c3e50")
         self._tree.tag_configure("odd", background="#f7f9fb", foreground="#2c3e50")
@@ -2283,14 +2307,22 @@ class PayrollView(ctk.CTkFrame):
     """
 
     def __init__(
-        self, parent, controller, role="Manager", db_config=None, employee_number=None
+        self,
+        parent,
+        controller,
+        role="Manager",
+        db_config=None,
+        employee_number=None,
+        session_manager=None,
     ):
         super().__init__(parent, fg_color="#f8f9fa")
         self.controller = controller
         self.role = role
         self.db_config = db_config or {}
         self.employee_number = employee_number
-        self._session_manager = getattr(controller, "session_manager", None)
+        self._session_manager = session_manager or getattr(
+            controller, "session_manager", None
+        )
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(3, weight=1)
@@ -2424,7 +2456,9 @@ class PayrollView(ctk.CTkFrame):
             conn = _get_conn(self.db_config)
             cur = conn.cursor()
             today = date.today()
-            week = today - timedelta(days=today.weekday()) + timedelta(days=5)  # Saturday
+            week = (
+                today - timedelta(days=today.weekday()) + timedelta(days=5)
+            )  # Saturday
 
             cur.execute("SELECT COUNT(*) FROM employees WHERE is_active=TRUE")
             result = cur.fetchone()

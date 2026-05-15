@@ -29,6 +29,7 @@ except ImportError:
     HAS_PSYCOPG2 = False
 
 from backend.report_service import ReportService
+from frontend.modular.date_picker import DatePickerField
 from .csv_tab import export_weekly_sales
 
 # ── Design tokens (extracted directly from screenshot) ────────────────────
@@ -189,7 +190,7 @@ class WeeklySalesReportView(ctk.CTkScrollableFrame):
         self._on_toggle_navigation = on_toggle_navigation
         self._is_navigation_visible = is_navigation_visible
         self._report_service = ReportService(
-            self.db_config or {}, getattr(controller, "session_manager", None)
+            dict(self.db_config or {}), getattr(controller, "session_manager", None)
         )
         self._all_rows = []
         self._week_end = "2006-08-09"
@@ -412,19 +413,14 @@ class WeeklySalesReportView(ctk.CTkScrollableFrame):
         ctk.CTkLabel(
             inner, text="Week ending:", font=FONT_BODY, text_color=TEXT_MUTED
         ).pack(side="left")
-        self._week_var = ctk.StringVar(value=self._week_end)
-        ctk.CTkEntry(
+        self._week_field = DatePickerField(
             inner,
-            textvariable=self._week_var,
+            default_date=datetime.datetime.strptime(self._week_end, "%Y-%m-%d").date(),
             width=110,
-            height=34,
-            corner_radius=6,
-            fg_color=SEARCH_BG,
-            text_color=TEXT_DARK,
-            border_color=BORDER,
-            border_width=1,
-            font=FONT_BODY,
-        ).pack(side="left", padx=(6, 6))
+            on_change=lambda _date: self._load_week(),
+        )
+        self._week_field.pack(side="left", padx=(6, 6))
+        self._week_var = self._week_field.variable
         ctk.CTkButton(
             inner,
             text="Load",
@@ -914,7 +910,7 @@ class WeeklySalesReportView(ctk.CTkScrollableFrame):
         tree.heading(col, command=lambda: self._sort(tree, col, not reverse))
 
     def _load_week(self):
-        self._week_end = self._week_var.get().strip() or self._week_end
+        self._week_end = self._week_field.get_value().strip() or self._week_end
         if hasattr(self, "_subtitle"):
             self._subtitle.configure(
                 text=(f"Week ending  {self._week_end}" "  ·  National Office Supplies")
@@ -922,5 +918,8 @@ class WeeklySalesReportView(ctk.CTkScrollableFrame):
         self.load_data()
 
     def _export_csv(self):
-        rows = [self._overview_tree.item(iid, "values") for iid in self._overview_tree.get_children()]
+        rows = [
+            self._overview_tree.item(iid, "values")
+            for iid in self._overview_tree.get_children()
+        ]
         export_weekly_sales(self, rows)

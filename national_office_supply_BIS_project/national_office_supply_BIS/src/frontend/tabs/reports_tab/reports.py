@@ -78,10 +78,19 @@ class ReportsHubView(ctk.CTkFrame):
         },
     }
 
-    def __init__(self, parent, controller=None, db_config: DBConfig | None = None):
+    def __init__(
+        self,
+        parent,
+        controller=None,
+        db_config: DBConfig | None = None,
+        session_manager=None,
+    ):
         super().__init__(parent, fg_color="#f8f9fa")
         self.controller = controller
         self.db_config = db_config
+        self.session_manager = session_manager or getattr(
+            controller, "session_manager", None
+        )
         self._section_frames = {}
         self._active_key = None
         self._sidebar_visible = True
@@ -271,6 +280,7 @@ class ReportsHubView(ctk.CTkFrame):
                 self.view_host,
                 controller=self.controller,
                 db_config=self.db_config,
+                session_manager=self.session_manager,
                 on_toggle_navigation=self.toggle_navigation,
                 is_navigation_visible=self._sidebar_visible,
             )

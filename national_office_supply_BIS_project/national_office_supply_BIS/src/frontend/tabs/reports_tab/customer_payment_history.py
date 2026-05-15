@@ -19,6 +19,7 @@ import customtkinter as ctk
 import psycopg2
 
 from backend.report_service import ReportService
+from frontend.modular.date_picker import DatePickerField
 from .csv_tab import export_customer_payments
 
 # ── Shared colour palette ─────────────────────────────────────────────────────
@@ -424,36 +425,18 @@ class CustomerPaymentHistoryView(ctk.CTkFrame):
         ctk.CTkLabel(
             inner, text="Date From:", font=FONT_BODY, text_color=TEXT_MUTED
         ).pack(side="left")
-        self._date_from_var = ctk.StringVar()
-        ctk.CTkEntry(
-            inner,
-            textvariable=self._date_from_var,
-            placeholder_text="YYYY-MM-DD",
-            width=110,
-            height=36,
-            corner_radius=6,
-            fg_color="#f5f7fa",
-            text_color=TEXT_DARK,
-            border_color=BORDER,
-        ).pack(side="left", padx=(6, 12))
-        self._date_from_var.trace_add("write", lambda *_: self._apply_filter())
+        self._date_from_picker = DatePickerField(inner, width=110)
+        self._date_from_picker.pack(side="left", padx=(6, 12))
+        self._date_from_picker.entry.bind(
+            "<KeyRelease>", lambda *_: self._apply_filter()
+        )
 
         ctk.CTkLabel(inner, text="To:", font=FONT_BODY, text_color=TEXT_MUTED).pack(
             side="left"
         )
-        self._date_to_var = ctk.StringVar()
-        ctk.CTkEntry(
-            inner,
-            textvariable=self._date_to_var,
-            placeholder_text="YYYY-MM-DD",
-            width=110,
-            height=36,
-            corner_radius=6,
-            fg_color="#f5f7fa",
-            text_color=TEXT_DARK,
-            border_color=BORDER,
-        ).pack(side="left", padx=(6, 0))
-        self._date_to_var.trace_add("write", lambda *_: self._apply_filter())
+        self._date_to_picker = DatePickerField(inner, width=110)
+        self._date_to_picker.pack(side="left", padx=(6, 0))
+        self._date_to_picker.entry.bind("<KeyRelease>", lambda *_: self._apply_filter())
 
         self._count_label = ctk.CTkLabel(
             inner,
@@ -463,14 +446,9 @@ class CustomerPaymentHistoryView(ctk.CTkFrame):
         )
         self._count_label.pack(side="right")
 
-    # ── Payment table ─────────────────────────────────────────────────────────
     def _build_table(self):
-        wrapper = ctk.CTkFrame(self._body, fg_color="transparent")
-        wrapper.pack(fill="x", padx=30, pady=(18, 30))
-        wrapper.columnconfigure(0, weight=1)
-
         card = ctk.CTkFrame(
-            wrapper,
+            self._body,
             fg_color=BG_CARD,
             corner_radius=10,
             border_width=1,
@@ -517,6 +495,9 @@ class CustomerPaymentHistoryView(ctk.CTkFrame):
             )
             cust_label, company = self.customers.get(cust_no, (f"C-{cust_no:04d}", "—"))
 
+            amount_value = float(amount) if amount is not None else 0.0
+            balance_after_value = float(bal_after) if bal_after is not None else None
+
             if isinstance(pay_date, str):
                 pay_date_str = pay_date
             elif isinstance(pay_date, (datetime.date, datetime.datetime)):
@@ -531,7 +512,9 @@ class CustomerPaymentHistoryView(ctk.CTkFrame):
                 tag = "general"
 
             bal_before = (
-                (float(bal_after) + float(amount)) if bal_after is not None else None
+                (balance_after_value + amount_value)
+                if balance_after_value is not None
+                else None
             )
             self._tree.insert(
                 "",
@@ -543,9 +526,13 @@ class CustomerPaymentHistoryView(ctk.CTkFrame):
                     inv_label,
                     pay_date_str,
                     f"₱{bal_before:,.2f}" if bal_before is not None else "—",
-                    f"₱{float(amount):,.2f}",
+                    f"₱{amount_value:,.2f}",
                     method.title() if method else "—",
-                    f"₱{float(bal_after):,.2f}" if bal_after is not None else "—",
+                    (
+                        f"₱{balance_after_value:,.2f}"
+                        if balance_after_value is not None
+                        else "—"
+                    ),
                 ),
                 tags=(tag,),
             )
@@ -625,8 +612,8 @@ class CustomerPaymentHistoryView(ctk.CTkFrame):
     def _apply_filter(self):
         query = self._search_var.get().lower()
         method = self._method_var.get()
-        d_from = self._date_from_var.get().strip()
-        d_to = self._date_to_var.get().strip()
+        d_from = self._date_from_picker.get_value().strip()
+        d_to = self._date_to_picker.get_value().strip()
 
         def parse_date(s: str):
             try:

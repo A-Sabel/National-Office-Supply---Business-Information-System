@@ -112,32 +112,47 @@ class NationalOfficeApp(ctk.CTk):
             username=self.session.employee_name or "User",
             role=self.session.role or "Staff",
             db_config=self.db_config,
+            session_manager=self.session_manager,
         )
         self.current_view.grid(row=0, column=0, sticky="nsew")
 
     def show_customers(self):
         self._clear_content()
-        self.current_view = CustomersView(self.content_container, self, self.db_config)
+        self.current_view = CustomersView(
+            self.content_container,
+            self,
+            self.db_config,
+            session_manager=self.session_manager,
+        )
         self.current_view.grid(row=0, column=0, sticky="nsew")
 
     def show_orders(self):
         self._clear_content()
         self.current_view = OrdersView(
-            self.content_container, controller=self, db_config=self.db_config
+            self.content_container,
+            controller=self,
+            db_config=self.db_config,
+            session_manager=self.session_manager,
         )
         self.current_view.grid(row=0, column=0, sticky="nsew")
 
     def show_inventory(self):
         self._clear_content()
         self.current_view = InventoryView(
-            self.content_container, controller=self, db_config=self.db_config
+            self.content_container,
+            controller=self,
+            db_config=self.db_config,
+            session_manager=self.session_manager,
         )
         self.current_view.grid(row=0, column=0, sticky="nsew")
 
     def show_reports(self):
         self._clear_content()
         self.current_view = ReportsHubView(
-            self.content_container, controller=self, db_config=self.db_config
+            self.content_container,
+            controller=self,
+            db_config=self.db_config,
+            session_manager=self.session_manager,
         )
         self.current_view.grid(row=0, column=0, sticky="nsew")
 
@@ -149,6 +164,7 @@ class NationalOfficeApp(ctk.CTk):
             role=self.session.role or "Manager",
             db_config=self.db_config,
             employee_number=self.session.employee_number,
+            session_manager=self.session_manager,
         )
         self.current_view.grid(row=0, column=0, sticky="nsew")
 

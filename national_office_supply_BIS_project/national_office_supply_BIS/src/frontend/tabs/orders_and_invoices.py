@@ -443,14 +443,12 @@ class OrdersDB:
             with conn:
                 with conn.cursor(cursor_factory=self._dict_cursor_factory()) as cur:
                     # 🔧 Pre-emptive sequence fix
-                    cur.execute(
-                        """
+                    cur.execute("""
                         SELECT setval(
                             pg_get_serial_sequence('invoices', 'invoice_id'),
                             COALESCE((SELECT MAX(invoice_id) FROM invoices), 0)
                         )
-                        """
-                    )
+                        """)
 
                     # 1. Create the invoice header (status = 'active')
                     cur.execute(
@@ -1872,10 +1870,21 @@ class CreateInvoicePanel(ctk.CTkFrame):
 class OrdersView(ctk.CTkFrame):
     """Tab 3 – Orders & Invoices"""
 
-    def __init__(self, master, controller, db_config=None, role="Manager", **kw):
+    def __init__(
+        self,
+        master,
+        controller,
+        db_config=None,
+        role="Manager",
+        session_manager=None,
+        **kw,
+    ):
         super().__init__(master, fg_color=C["bg"], **kw)
         self.controller = controller
         self.db_config = db_config
+        self.session_manager = session_manager or getattr(
+            controller, "session_manager", None
+        )
         self.role = (
             getattr(controller, "session", None) and controller.session.role or role
         )
@@ -1888,9 +1897,7 @@ class OrdersView(ctk.CTkFrame):
         self.db: "OrdersDB | None" = None
         if HAS_DB and db_config:
             try:
-                self.db = OrdersDB(
-                    db_config, getattr(controller, "session_manager", None)
-                )
+                self.db = OrdersDB(db_config, self.session_manager)
             except Exception as exc:
                 print(f"[OrdersView] Could not create OrdersDB: {exc}")
 

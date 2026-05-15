@@ -20,13 +20,22 @@ logger = logging.getLogger(__name__)
 
 class DashboardView(ctk.CTkScrollableFrame):
     def __init__(
-        self, parent, controller, username="User", role="Staff", db_config=None
+        self,
+        parent,
+        controller,
+        username="User",
+        role="Staff",
+        db_config=None,
+        session_manager=None,
     ):
         super().__init__(parent, fg_color="#f8f9fa", corner_radius=0, border_width=0)
         self.controller = controller
         self.db_config = db_config
         self.username = username
         self.role = role
+        self.session_manager = session_manager or getattr(
+            controller, "session_manager", None
+        )
 
         # Use Decimal for safe arithmetic with DB Decimal types
         try:
