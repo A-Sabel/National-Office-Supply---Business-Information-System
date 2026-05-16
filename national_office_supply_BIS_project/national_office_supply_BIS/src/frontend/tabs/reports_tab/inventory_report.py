@@ -433,30 +433,6 @@ class InventorySalesReportView(ctk.CTkFrame):
             command=self._apply_filter,
         ).pack(side="left", padx=(4, 20))
 
-        # Date range filter
-        ctk.CTkLabel(
-            inner, text="Date Range:", font=FONT_BODY, text_color=TEXT_MUTED
-        ).pack(side="left")
-        self._from_picker = DatePickerField(
-            inner,
-            width=110,
-            placeholder_text="From",
-            on_change=lambda _d: self._apply_filter(),
-        )
-        self._from_picker.pack(side="left", padx=(6, 4))
-        self._from_picker.entry.bind("<KeyRelease>", lambda *_: self._apply_filter())
-
-        ctk.CTkLabel(inner, text="to", font=FONT_BODY, text_color=TEXT_MUTED).pack(
-            side="left", padx=(2, 4)
-        )
-        self._to_picker = DatePickerField(
-            inner,
-            width=110,
-            placeholder_text="To",
-            on_change=lambda _d: self._apply_filter(),
-        )
-        self._to_picker.pack(side="left", padx=(4, 20))
-        self._to_picker.entry.bind("<KeyRelease>", lambda *_: self._apply_filter())
 
         self._count_label = ctk.CTkLabel(
             inner,
