@@ -298,16 +298,21 @@ class BacklogReportView(ctk.CTkFrame):
             filter_inner, text="Date:", font=FONT_BODY, bg=CARD_BG, fg=TEXT_MUTED
         ).pack(side="left", padx=(12, 6))
         self._from_picker = DatePickerField(
-            filter_inner, width=100, placeholder_text="From"
+            filter_inner,
+            width=100,
+            placeholder_text="From",
+            on_change=lambda _d: self._apply_filter(),
         )
         self._from_picker.pack(side="left", padx=(0, 4))
-        self._from_picker.entry.bind("<KeyRelease>", lambda *_: self._apply_filter())
 
         tk.Label(
             filter_inner, text="to", font=FONT_BODY, bg=CARD_BG, fg=TEXT_MUTED
         ).pack(side="left", padx=(2, 4))
         self._to_picker = DatePickerField(
-            filter_inner, width=100, placeholder_text="To"
+            filter_inner,
+            width=100,
+            placeholder_text="To",
+            on_change=lambda _d: self._apply_filter(),
         )
         self._to_picker.pack(side="left", padx=(0, 12))
         self._to_picker.entry.bind("<KeyRelease>", lambda *_: self._apply_filter())

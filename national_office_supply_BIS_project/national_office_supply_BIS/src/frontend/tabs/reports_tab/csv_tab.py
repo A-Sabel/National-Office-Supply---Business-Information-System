@@ -119,6 +119,8 @@ def open_export_dialog(
     date_col_index: int | None = None,
     date_label: str = "Date",
     dict_date_key: str | None = None,
+    prefill_from=None,
+    prefill_to=None,
 ) -> None:
     """Open a modal date-range export dialog."""
 
@@ -131,6 +133,8 @@ def open_export_dialog(
         date_col_index=date_col_index,
         date_label=date_label,
         dict_date_key=dict_date_key,
+        prefill_from=prefill_from,
+        prefill_to=prefill_to,
     )
     dialog.grab_set()  # modal
     parent.wait_window(dialog)
@@ -152,10 +156,18 @@ class _ExportDialog(ctk.CTkToplevel):
         date_col_index: int | None,
         date_label: str,
         dict_date_key: str | None,
+        prefill_from=None,
+        prefill_to=None,
     ):
         super().__init__(parent)
         self.title(f"Export — {report_title}")
-        self.resizable(False, False)
+        # Allow the dialog to be resized so controls (buttons) can't be clipped
+        self.resizable(True, True)
+        # Enforce a sensible minimum size so layout doesn't collapse
+        try:
+            self.minsize(560, 360)
+        except Exception:
+            pass
         self.configure(fg_color=BG_PAGE)
 
         self._report_title = report_title
@@ -168,8 +180,31 @@ class _ExportDialog(ctk.CTkToplevel):
 
         self._has_date_filter = date_col_index is not None or dict_date_key is not None
 
+        # store prefill values on the instance for use in _build()
+        self._prefill_from = prefill_from
+        self._prefill_to = prefill_to
+
+        # Start at a size that shows the full content on most displays
+        try:
+            self.geometry("760x480")
+        except Exception:
+            pass
+
         self._build()
         self._center()
+
+        # Keyboard shortcuts: Enter to export, Escape to cancel
+        self.bind("<Return>", lambda e: self._do_export())
+        self.bind("<Escape>", lambda e: self.destroy())
+
+        # Focus the first input so Enter works even if buttons are off-screen
+        try:
+            if self._has_date_filter:
+                self._from_picker.entry.focus_set()
+            else:
+                self.focus_set()
+        except Exception:
+            pass
 
     # ── layout ────────────────────────────────────────────────────────────────
 
@@ -218,6 +253,7 @@ class _ExportDialog(ctk.CTkToplevel):
                 card,
                 label="From",
                 width=160,
+                on_change=self._on_from_changed,
             )
             self._from_picker.grid(
                 row=1, column=0, sticky="ew", padx=(14, 6), pady=(0, 14)
@@ -234,6 +270,29 @@ class _ExportDialog(ctk.CTkToplevel):
 
             self._from_var = self._from_picker.variable
             self._to_var = self._to_picker.variable
+
+            # If caller supplied prefill values, initialize the pickers.
+            if getattr(self, "_prefill_from", None):
+                try:
+                    self._from_picker.set_date(self._prefill_from)
+                except Exception:
+                    self._from_var.set(str(self._prefill_from))
+            if getattr(self, "_prefill_to", None):
+                try:
+                    self._to_picker.set_date(self._prefill_to)
+                except Exception:
+                    self._to_var.set(str(self._prefill_to))
+            # If only from is provided, default to a 1-week range (6 days after)
+            if getattr(self, "_prefill_from", None) and not getattr(
+                self, "_prefill_to", None
+            ):
+                try:
+                    d = self._from_picker.get_date()
+                    if d:
+                        to_d = d + datetime.timedelta(days=6)
+                        self._to_picker.set_date(to_d)
+                except Exception:
+                    pass
 
             ctk.CTkLabel(
                 card,
@@ -283,8 +342,10 @@ class _ExportDialog(ctk.CTkToplevel):
             self._to_var.trace_add("write", lambda *_: self._update_preview())
 
         # ── buttons ───────────────────────────────────────────────────────────
-        btn_row = ctk.CTkFrame(self, fg_color="transparent")
-        btn_row.pack(fill="x", padx=24, pady=(0, 20))
+        # Place buttons inside the white card so they remain visible near controls
+        btn_row = ctk.CTkFrame(card, fg_color="transparent")
+        # grid inside card below the card contents (row index reserved above)
+        btn_row.grid(row=4, column=0, columnspan=2, sticky="e", padx=14, pady=(0, 14))
 
         ctk.CTkButton(
             btn_row,
@@ -355,6 +416,19 @@ class _ExportDialog(ctk.CTkToplevel):
         except Exception:
             pass
 
+    def _on_from_changed(self, selected_date):
+        """When the From picker changes, if To is empty, set To = From + 6 days."""
+        try:
+            # only set To if user hasn't already chosen one
+            t = self._to_picker.get_value().strip()
+            if not t and selected_date:
+                new_to = selected_date + datetime.timedelta(days=6)
+                self._to_picker.set_date(new_to)
+        except Exception:
+            pass
+        finally:
+            self._update_preview()
+
     def _do_export(self):
         rows = self._filtered_rows()
         if not rows:
@@ -403,8 +477,32 @@ class _ExportDialog(ctk.CTkToplevel):
 # ── convenience wrappers (one per report) ─────────────────────────────────────
 
 
+def _detect_prefill(parent):
+    """Try to extract current From/To values from common picker attributes on the parent view."""
+    p_from = None
+    p_to = None
+    # common names used across report views
+    if hasattr(parent, "_from_picker"):
+        p_from = parent._from_picker.get_value().strip()
+    elif hasattr(parent, "_date_from_picker"):
+        p_from = parent._date_from_picker.get_value().strip()
+    elif hasattr(parent, "_week_field"):
+        w = parent._week_field.get_value().strip()
+        if w:
+            p_from = w
+            p_to = w
+
+    if hasattr(parent, "_to_picker"):
+        p_to = parent._to_picker.get_value().strip()
+    elif hasattr(parent, "_date_to_picker"):
+        p_to = parent._date_to_picker.get_value().strip()
+
+    return (p_from or None, p_to or None)
+
+
 def export_weekly_sales(parent, rows: list):
     """Weekly Sales — date field: 'Week Ending' (index 8)."""
+    p_from, p_to = _detect_prefill(parent)
     open_export_dialog(
         parent=parent,
         title="Weekly Sales Report",
@@ -423,11 +521,14 @@ def export_weekly_sales(parent, rows: list):
         rows=rows,
         date_col_index=8,
         date_label="Week Ending",
+        prefill_from=p_from,
+        prefill_to=p_to,
     )
 
 
 def export_inventory(parent, rows: list):
     """Inventory Report — no date column; exports all visible rows."""
+    p_from, p_to = _detect_prefill(parent)
     open_export_dialog(
         parent=parent,
         title="Inventory Report",
@@ -444,11 +545,14 @@ def export_inventory(parent, rows: list):
         rows=rows,
         date_col_index=None,
         date_label="",
+        prefill_from=p_from,
+        prefill_to=p_to,
     )
 
 
 def export_stock_ordering(parent, rows: list, headers: list[str]):
     """Stock Ordering Report — no date column; exports all visible rows."""
+    p_from, p_to = _detect_prefill(parent)
     open_export_dialog(
         parent=parent,
         title="Stock Ordering Report",
@@ -457,11 +561,14 @@ def export_stock_ordering(parent, rows: list, headers: list[str]):
         rows=rows,
         date_col_index=None,
         date_label="",
+        prefill_from=p_from,
+        prefill_to=p_to,
     )
 
 
 def export_backlog(parent, rows: list):
     """Backlog Report — date field: 'Order Date' (index 1)."""
+    p_from, p_to = _detect_prefill(parent)
     open_export_dialog(
         parent=parent,
         title="Backlog Report",
@@ -479,11 +586,14 @@ def export_backlog(parent, rows: list):
         rows=rows,
         date_col_index=1,
         date_label="Order Date",
+        prefill_from=p_from,
+        prefill_to=p_to,
     )
 
 
 def export_customer_balances(parent, rows: list):
     """Customer List & Balances — no date column."""
+    p_from, p_to = _detect_prefill(parent)
     open_export_dialog(
         parent=parent,
         title="Customer List & Balances",
@@ -499,11 +609,14 @@ def export_customer_balances(parent, rows: list):
         rows=rows,
         date_col_index=None,
         date_label="",
+        prefill_from=p_from,
+        prefill_to=p_to,
     )
 
 
 def export_customer_payments(parent, rows: list, headers: list[str]):
     """Customer Payment History — date field: 'Payment Date' (index 3)."""
+    p_from, p_to = _detect_prefill(parent)
     open_export_dialog(
         parent=parent,
         title="Customer Payment History",
@@ -512,11 +625,14 @@ def export_customer_payments(parent, rows: list, headers: list[str]):
         rows=rows,
         date_col_index=3,
         date_label="Payment Date",
+        prefill_from=p_from,
+        prefill_to=p_to,
     )
 
 
 def export_audit_log(parent, rows: list[dict]):
     """Audit Log — date field: 'timestamp' dict key."""
+    p_from, p_to = _detect_prefill(parent)
     open_export_dialog(
         parent=parent,
         title="Audit Log",
@@ -534,4 +650,6 @@ def export_audit_log(parent, rows: list[dict]):
         date_col_index=None,
         dict_date_key="timestamp",
         date_label="Timestamp",
+        prefill_from=p_from,
+        prefill_to=p_to,
     )
