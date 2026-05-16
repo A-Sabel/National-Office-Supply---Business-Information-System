@@ -615,7 +615,9 @@ def export_customer_balances(parent, rows: list):
 
 
 def export_customer_payments(parent, rows: list, headers: list[str]):
-    """Customer Payment History — date field: 'Payment Date' (index 3)."""
+    """Customer Payment History — date field: 'Payment Date' (index 4).
+    Columns: Pay. ID(0) | Customer No.(1) | Company(2) | Invoice No.(3) | Payment Date(4) | ...
+    """
     p_from, p_to = _detect_prefill(parent)
     open_export_dialog(
         parent=parent,
@@ -623,7 +625,7 @@ def export_customer_payments(parent, rows: list, headers: list[str]):
         default_name="payment_history",
         headers=headers,
         rows=rows,
-        date_col_index=3,
+        date_col_index=4,
         date_label="Payment Date",
         prefill_from=p_from,
         prefill_to=p_to,

@@ -301,7 +301,6 @@ class BacklogReportView(ctk.CTkFrame):
             filter_inner,
             width=100,
             placeholder_text="From",
-            on_change=lambda _d: self._apply_filter(),
         )
         self._from_picker.pack(side="left", padx=(0, 4))
 
@@ -312,10 +311,21 @@ class BacklogReportView(ctk.CTkFrame):
             filter_inner,
             width=100,
             placeholder_text="To",
-            on_change=lambda _d: self._apply_filter(),
         )
-        self._to_picker.pack(side="left", padx=(0, 12))
-        self._to_picker.entry.bind("<KeyRelease>", lambda *_: self._apply_filter())
+        self._to_picker.pack(side="left", padx=(0, 8))
+
+        ctk.CTkButton(
+            filter_inner,
+            text="Load",
+            width=70,
+            height=30,
+            corner_radius=7,
+            font=("Segoe UI", 11, "bold"),
+            fg_color="#3b82f6",
+            hover_color="#2563eb",
+            text_color=TEXT_WHITE,
+            command=self._apply_filter,
+        ).pack(side="left", padx=(0, 12))
 
         self._count_lbl = tk.Label(
             filter_inner, text="\u2014 items", font=FONT_BODY, bg=CARD_BG, fg=TEXT_MUTED
@@ -442,8 +452,28 @@ class BacklogReportView(ctk.CTkFrame):
             return None
 
     def _apply_filter(self):
-        """Apply search filter to backlog rows."""
+        """Apply search text and date range filter to backlog rows."""
         query = self._filter_var.get().strip().lower()
+
+        def parse_date(s) -> datetime.date | None:
+            """Try multiple formats so picker output always parses correctly."""
+            if isinstance(s, datetime.datetime):
+                return s.date()
+            if isinstance(s, datetime.date):
+                return s
+            if not s:
+                return None
+            s = str(s).strip()
+            for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%d/%m/%Y", "%Y/%m/%d"):
+                try:
+                    return datetime.datetime.strptime(s[:10], fmt).date()
+                except ValueError:
+                    continue
+            return None
+
+        dt_from = parse_date(self._from_picker.get_value())
+        dt_to = parse_date(self._to_picker.get_value())
+
         filtered = []
         for row in self._all_rows:
             inv_id, date, cust_num, cust_name, part_num, desc, qty, status = row
@@ -453,6 +483,14 @@ class BacklogReportView(ctk.CTkFrame):
                 not in (str(inv_id) + str(part_num) + desc + cust_name).lower()
             ):
                 continue
+            if dt_from or dt_to:
+                row_date = parse_date(date)
+                if row_date is None:
+                    continue
+                if dt_from and row_date < dt_from:
+                    continue
+                if dt_to and row_date > dt_to:
+                    continue
             filtered.append(row)
         self._render_rows(filtered)
         self._count_lbl.configure(text=f"{len(filtered)} items")
