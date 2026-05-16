@@ -2174,25 +2174,26 @@ class InventoryView(ctk.CTkFrame):
 
             supplier_id = self._editing_supplier_id
             if supplier_id:
+                # UPDATE path — no sequence needed
                 cur.execute(
                     "UPDATE suppliers SET company_name=%s, phone_number=%s, address=%s WHERE supplier_id=%s",
-                    (
-                        name,
-                        supp_phone.get().strip(),
-                        supp_address.get().strip(),
-                        supplier_id,
-                    ),
+                    (name, supp_phone.get().strip(), supp_address.get().strip(), supplier_id),
                 )
             else:
+                # INSERT path — fix sequence drift first
+                cur.execute("""
+                    SELECT setval(
+                        'suppliers_supplier_id_seq',
+                        COALESCE((SELECT MAX(supplier_id) FROM suppliers), 0) + 1,
+                        false
+                    )
+                """)
                 cur.execute(
                     "INSERT INTO suppliers (company_name, phone_number, address) VALUES (%s, %s, %s) RETURNING supplier_id",
-                    (
-                        name,
-                        supp_phone.get().strip(),
-                        supp_address.get().strip(),
-                    ),
+                    (name, supp_phone.get().strip(), supp_address.get().strip()),
                 )
                 supplier_id = cur.fetchone()[0]
+
             if selected_part_desc and cost_str:
                 try:
                     cost_val = float(cost_str)
@@ -2202,6 +2203,8 @@ class InventoryView(ctk.CTkFrame):
                         "Cost must be a valid number. Supplier saved, but part link failed.",
                     )
                     conn.commit()
+                    cur.close()
+                    conn.close()
                     return
                 part_number = next(
                     (r[0] for r in self._parts_rows if r[1] == selected_part_desc), None
@@ -2218,14 +2221,17 @@ class InventoryView(ctk.CTkFrame):
                         VALUES (%s, %s, %s)
                         ON CONFLICT (part_number, supplier_id) 
                         DO UPDATE SET cost = EXCLUDED.cost
-                    """,
+                        """,
                         (part_number, supplier_id, cost_val),
                     )
+
             conn.commit()
+            cur.close()
             conn.close()
             self._clear_supplier_form()
             self._load_supplier_list()
             messagebox.showinfo("Success", "Supplier info saved!")
+
         except Exception as e:
             messagebox.showerror("DB Error", str(e))
 
