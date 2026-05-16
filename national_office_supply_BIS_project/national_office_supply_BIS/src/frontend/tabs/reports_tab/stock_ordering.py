@@ -20,6 +20,7 @@ except ImportError:
     HAS_PSYCOPG2 = False
 
 from backend.report_service import ReportService
+from frontend.modular.date_picker import DatePickerField
 from .csv_tab import export_stock_ordering
 
 # ── Design tokens ────────────────────────────────────────────────────────────
@@ -473,7 +474,24 @@ class StockOrderingReportView(ctk.CTkFrame):
             dropdown_text_color=TEXT_DARK,
             command=lambda _: self._apply_filter(),
         ).pack(side="left", padx=10)
+        # Date range filter
+        tk.Label(
+            filter_inner, text="Date Range:", font=FONT_BODY, bg=CARD_BG, fg=TEXT_MUTED
+        ).pack(side="left", padx=(10, 6))
+        self._from_picker = DatePickerField(
+            filter_inner, width=100, placeholder_text="From"
+        )
+        self._from_picker.pack(side="left", padx=(0, 4))
+        self._from_picker.entry.bind("<KeyRelease>", lambda *_: self._apply_filter())
 
+        tk.Label(
+            filter_inner, text="to", font=FONT_BODY, bg=CARD_BG, fg=TEXT_MUTED
+        ).pack(side="left", padx=(2, 4))
+        self._to_picker = DatePickerField(
+            filter_inner, width=100, placeholder_text="To"
+        )
+        self._to_picker.pack(side="left", padx=(0, 10))
+        self._to_picker.entry.bind("<KeyRelease>", lambda *_: self._apply_filter())
         self._count_lbl = tk.Label(
             filter_inner, text="\u2014 items", font=FONT_BODY, bg=CARD_BG, fg=TEXT_MUTED
         )

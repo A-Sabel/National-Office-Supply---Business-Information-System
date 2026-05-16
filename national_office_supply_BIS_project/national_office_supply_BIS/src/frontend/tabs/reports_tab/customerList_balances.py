@@ -9,6 +9,7 @@ import customtkinter as ctk
 import psycopg2
 
 from backend.report_service import ReportService
+from frontend.modular.date_picker import DatePickerField
 from .csv_tab import export_customer_balances
 
 # ── Shared colour palette ─────────────────────────────────────────────────────
@@ -448,7 +449,22 @@ class CustomerListReportView(ctk.CTkFrame):
             fg_color=ACCENT_AMBER,
             hover_color="#e67e22",
             command=self._apply_filter,
-        ).pack(side="left", padx=(4, 0))
+        ).pack(side="left", padx=(4, 20))
+
+        # Date range filter
+        ctk.CTkLabel(
+            inner, text="Date Range:", font=FONT_BODY, text_color=TEXT_MUTED
+        ).pack(side="left")
+        self._from_picker = DatePickerField(inner, width=110, placeholder_text="From")
+        self._from_picker.pack(side="left", padx=(6, 4))
+        self._from_picker.entry.bind("<KeyRelease>", lambda *_: self._apply_filter())
+
+        ctk.CTkLabel(inner, text="to", font=FONT_BODY, text_color=TEXT_MUTED).pack(
+            side="left", padx=(2, 4)
+        )
+        self._to_picker = DatePickerField(inner, width=110, placeholder_text="To")
+        self._to_picker.pack(side="left", padx=(4, 0))
+        self._to_picker.entry.bind("<KeyRelease>", lambda *_: self._apply_filter())
 
         self._count_label = ctk.CTkLabel(
             inner,
@@ -836,5 +852,8 @@ class CustomerListReportView(ctk.CTkFrame):
 
     # ── CSV export ────────────────────────────────────────────────────────────
     def _export_csv(self):
-        rows = [self._customers_tree.item(iid, "values") for iid in self._customers_tree.get_children()]
+        rows = [
+            self._customers_tree.item(iid, "values")
+            for iid in self._customers_tree.get_children()
+        ]
         export_customer_balances(self, rows)

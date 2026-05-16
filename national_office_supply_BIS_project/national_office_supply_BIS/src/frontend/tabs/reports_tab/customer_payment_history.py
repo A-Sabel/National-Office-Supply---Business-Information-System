@@ -454,7 +454,7 @@ class CustomerPaymentHistoryView(ctk.CTkFrame):
             border_width=1,
             border_color=BORDER,
         )
-        card.grid(row=0, column=0, sticky="ew")
+        card.pack(fill="x", padx=30, pady=(20, 16))
         card.columnconfigure(0, weight=1)
 
         note = ctk.CTkFrame(card, fg_color="#eaf4fb", corner_radius=8)

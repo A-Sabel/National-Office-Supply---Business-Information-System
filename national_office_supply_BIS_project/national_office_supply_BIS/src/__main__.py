@@ -3,7 +3,12 @@ import os
 import customtkinter as ctk
 from dotenv import load_dotenv
 
-# --- ADD THESE IMPORTS ---
+# Patch CustomTkinter mouse-wheel scroll bug before creating any widgets
+from utils.ctk_patch import patch_ctk_mouse_wheel
+
+patch_ctk_mouse_wheel()
+
+# --- APP IMPORTS ---
 from backend.session_manager import SessionManager
 from frontend.tabs.login import LoginView
 
@@ -34,7 +39,7 @@ class NationalOfficeApp(ctk.CTk):
         self.db_config: DBConfig = {
             "dbname": os.getenv("DB_NAME", "NOS_DB"),
             "user": os.getenv("DB_USER", "postgres"),
-            "password": os.getenv("DB_PASS", "twicejjang123"),
+            "password": os.getenv("DB_PASS", ""),
             "host": os.getenv("DB_HOST", "localhost"),
             "port": int(os.getenv("DB_PORT", 5432)),
         }

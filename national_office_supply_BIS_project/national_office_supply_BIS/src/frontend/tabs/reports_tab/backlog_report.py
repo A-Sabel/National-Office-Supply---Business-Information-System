@@ -23,6 +23,7 @@ except ImportError:
     HAS_PSYCOPG2 = False
 
 from backend.report_service import ReportService
+from frontend.modular.date_picker import DatePickerField
 
 # ── Design tokens ────────────────────────────────────────────────────────────
 PAGE_BG = "#f0f2f5"
@@ -284,13 +285,32 @@ class BacklogReportView(ctk.CTkFrame):
             search_wrap,
             textvariable=self._filter_var,
             placeholder_text="Search invoice, part, or customer\u2026",
-            width=350,
+            width=280,
             height=30,
             border_width=0,
             fg_color="#f5f6f8",
             font=FONT_BODY,
             text_color=TEXT_DARK,
         ).pack(side="left", padx=(0, 6))
+
+        # Date range filter
+        tk.Label(
+            filter_inner, text="Date:", font=FONT_BODY, bg=CARD_BG, fg=TEXT_MUTED
+        ).pack(side="left", padx=(12, 6))
+        self._from_picker = DatePickerField(
+            filter_inner, width=100, placeholder_text="From"
+        )
+        self._from_picker.pack(side="left", padx=(0, 4))
+        self._from_picker.entry.bind("<KeyRelease>", lambda *_: self._apply_filter())
+
+        tk.Label(
+            filter_inner, text="to", font=FONT_BODY, bg=CARD_BG, fg=TEXT_MUTED
+        ).pack(side="left", padx=(2, 4))
+        self._to_picker = DatePickerField(
+            filter_inner, width=100, placeholder_text="To"
+        )
+        self._to_picker.pack(side="left", padx=(0, 12))
+        self._to_picker.entry.bind("<KeyRelease>", lambda *_: self._apply_filter())
 
         self._count_lbl = tk.Label(
             filter_inner, text="\u2014 items", font=FONT_BODY, bg=CARD_BG, fg=TEXT_MUTED
@@ -383,7 +403,7 @@ class BacklogReportView(ctk.CTkFrame):
             return None
         try:
             rows = self._report_service.execute_query("""
-                SELECT DISTINCT
+                SELECT
                     i.invoice_id::text,
                     i.date_written::text,
                     c.customer_number,
