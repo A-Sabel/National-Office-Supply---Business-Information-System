@@ -3,7 +3,12 @@ import os
 import customtkinter as ctk
 from dotenv import load_dotenv
 
-# --- ADD THESE IMPORTS ---
+# Patch CustomTkinter mouse-wheel scroll bug before creating any widgets
+from utils.ctk_patch import patch_ctk_mouse_wheel
+
+patch_ctk_mouse_wheel()
+
+# --- APP IMPORTS ---
 from backend.session_manager import SessionManager
 from frontend.tabs.login import LoginView
 
@@ -32,7 +37,7 @@ class NationalOfficeApp(ctk.CTk):
 
         # 1. Initialize DB Config
         self.db_config: DBConfig = {
-            "dbname": os.getenv("DB_NAME", "postgres"),
+            "dbname": os.getenv("DB_NAME", "NOS_DB"),
             "user": os.getenv("DB_USER", "postgres"),
             "password": os.getenv("DB_PASS", ""),
             "host": os.getenv("DB_HOST", "localhost"),
@@ -112,32 +117,47 @@ class NationalOfficeApp(ctk.CTk):
             username=self.session.employee_name or "User",
             role=self.session.role or "Staff",
             db_config=self.db_config,
+            session_manager=self.session_manager,
         )
         self.current_view.grid(row=0, column=0, sticky="nsew")
 
     def show_customers(self):
         self._clear_content()
-        self.current_view = CustomersView(self.content_container, self, self.db_config)
+        self.current_view = CustomersView(
+            self.content_container,
+            self,
+            self.db_config,
+            session_manager=self.session_manager,
+        )
         self.current_view.grid(row=0, column=0, sticky="nsew")
 
     def show_orders(self):
         self._clear_content()
         self.current_view = OrdersView(
-            self.content_container, controller=self, db_config=self.db_config
+            self.content_container,
+            controller=self,
+            db_config=self.db_config,
+            session_manager=self.session_manager,
         )
         self.current_view.grid(row=0, column=0, sticky="nsew")
 
     def show_inventory(self):
         self._clear_content()
         self.current_view = InventoryView(
-            self.content_container, controller=self, db_config=self.db_config
+            self.content_container,
+            controller=self,
+            db_config=self.db_config,
+            session_manager=self.session_manager,
         )
         self.current_view.grid(row=0, column=0, sticky="nsew")
 
     def show_reports(self):
         self._clear_content()
         self.current_view = ReportsHubView(
-            self.content_container, controller=self, db_config=self.db_config
+            self.content_container,
+            controller=self,
+            db_config=self.db_config,
+            session_manager=self.session_manager,
         )
         self.current_view.grid(row=0, column=0, sticky="nsew")
 
@@ -149,6 +169,7 @@ class NationalOfficeApp(ctk.CTk):
             role=self.session.role or "Manager",
             db_config=self.db_config,
             employee_number=self.session.employee_number,
+            session_manager=self.session_manager,
         )
         self.current_view.grid(row=0, column=0, sticky="nsew")
 

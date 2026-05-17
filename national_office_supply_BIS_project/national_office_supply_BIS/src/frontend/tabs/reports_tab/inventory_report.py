@@ -9,6 +9,8 @@ import customtkinter as ctk
 import psycopg2
 
 from backend.report_service import ReportService
+from frontend.modular.date_picker import DatePickerField
+from .csv_tab import export_inventory
 
 # ── Colour palette ────────────────────────────────────────────────────────────
 BRAND_NAVY = "#001440"
@@ -248,7 +250,7 @@ class InventorySalesReportView(ctk.CTkFrame):
                 ORDER BY p.stock_count ASC, p.part_number
             """)
             if not rows:
-                return []          # ← empty list, NOT None — forces the DB branch
+                return []  # ← empty list, NOT None — forces the DB branch
             return [
                 (
                     self._part_label(row["part_number"]),
@@ -262,7 +264,7 @@ class InventorySalesReportView(ctk.CTkFrame):
             ]
         except Exception as e:
             print(f"[Inventory] _load_reorder failed: {e}")
-            return None     
+            return None
 
     # ==================================================================
     # Header
@@ -311,18 +313,6 @@ class InventorySalesReportView(ctk.CTkFrame):
 
         ctk.CTkButton(
             right,
-            text="🖨  Print",
-            width=100,
-            height=34,
-            corner_radius=6,
-            fg_color="#ecf0f1",
-            text_color=TEXT_DARK,
-            hover_color=BORDER,
-            font=FONT_BODY,
-        ).pack(side="left", padx=(0, 8))
-
-        ctk.CTkButton(
-            right,
             text="⬇  Export CSV",
             width=130,
             height=34,
@@ -332,15 +322,27 @@ class InventorySalesReportView(ctk.CTkFrame):
             text_color=TEXT_WHITE,
             font=FONT_BTN,
             command=self._export_csv,
-        ).pack(side="left")
+        ).pack(side="right")
+
+        ctk.CTkButton(
+            right,
+            text="↺  Refresh",
+            width=110,
+            height=34,
+            corner_radius=6,
+            fg_color="transparent",
+            hover_color="#e8f4fd",
+            text_color=BRAND_BLUE,
+            border_width=1,
+            border_color=BRAND_BLUE,
+            font=FONT_BTN,
+            command=self._apply_filter,
+        ).pack(side="right", padx=(0, 10))
 
     def _handle_nav_toggle(self):
-        """Tell the parent hub to toggle the sidebar, then flip the arrow."""
+        """Tell the parent hub to toggle the sidebar."""
         if callable(self._on_toggle_navigation):
             self._on_toggle_navigation()
-        # Flip local state and arrow immediately
-        self._is_navigation_visible = not self._is_navigation_visible
-        self._nav_toggle_btn.configure(text="◀" if self._is_navigation_visible else "▶")
 
     # ==================================================================
     # KPI strip
@@ -430,6 +432,7 @@ class InventorySalesReportView(ctk.CTkFrame):
             hover_color="#e67e22",
             command=self._apply_filter,
         ).pack(side="left", padx=(4, 20))
+
 
         self._count_label = ctk.CTkLabel(
             inner,
@@ -615,7 +618,7 @@ class InventorySalesReportView(ctk.CTkFrame):
         tree.delete(*tree.get_children())
         db_rows = self._load_reorder()
 
-        if db_rows is not None:                    # DB path (includes empty list)
+        if db_rows is not None:  # DB path (includes empty list)
             for part_no, desc, stock, trigger, on_order, has_unshipped in db_rows:
                 # QD-Sec 3/4/5 action logic
                 if stock == 0 and not on_order:
@@ -624,7 +627,7 @@ class InventorySalesReportView(ctk.CTkFrame):
                     action, tag = "⏳ Order Pending", "low"
                 elif stock <= trigger and not on_order:
                     action, tag = "📦 Place Reorder", "low"
-                else:                              # low stock but order already placed
+                else:  # low stock but order already placed
                     action, tag = "⏳ Order Pending", "low"
 
                 tree.insert(
@@ -637,8 +640,10 @@ class InventorySalesReportView(ctk.CTkFrame):
                         trigger,
                         "Yes" if on_order else "No",
                         # QD-Sec5: only flag unshipped if there's no open PO
-                        "⚠️ Yes" if (has_unshipped and not on_order) else (
-                            "Yes" if has_unshipped else "No"
+                        (
+                            "⚠️ Yes"
+                            if (has_unshipped and not on_order)
+                            else ("Yes" if has_unshipped else "No")
                         ),
                         action,
                     ),
@@ -647,12 +652,21 @@ class InventorySalesReportView(ctk.CTkFrame):
 
             if not db_rows:
                 tree.insert(
-                    "", "end",
-                    values=("—", "No parts at or below trigger level", "", "", "", "", ""),
+                    "",
+                    "end",
+                    values=(
+                        "—",
+                        "No parts at or below trigger level",
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                    ),
                     tags=("low",),
                 )
 
-        else:                                      # fallback to sample data
+        else:  # fallback to sample data
             for p in [p for p in self.parts if p[3] <= p[4]]:
                 part_no, desc, _, stock, trigger, on_order, _ = p
                 unshipped = "Yes" if (stock <= 1 and not on_order) else "No"
@@ -665,15 +679,25 @@ class InventorySalesReportView(ctk.CTkFrame):
                 tree.insert(
                     "",
                     "end",
-                    values=(part_no, desc, stock, trigger,
-                            "Yes" if on_order else "No", unshipped, action),
+                    values=(
+                        part_no,
+                        desc,
+                        stock,
+                        trigger,
+                        "Yes" if on_order else "No",
+                        unshipped,
+                        action,
+                    ),
                     tags=(tag,),
                 )
 
     def _build_reorder_tab(self, parent) -> ctk.CTkFrame:
         frame = ctk.CTkFrame(
-            parent, fg_color=BG_CARD, corner_radius=10,
-            border_width=1, border_color=BORDER,
+            parent,
+            fg_color=BG_CARD,
+            corner_radius=10,
+            border_width=1,
+            border_color=BORDER,
         )
         frame.columnconfigure(0, weight=1)
 
@@ -701,12 +725,17 @@ class InventorySalesReportView(ctk.CTkFrame):
             text_color=TEXT_DARK,
             hover_color=BORDER,
             font=FONT_SMALL,
-            command=self._populate_reorder,       # re-queries live DB on click
+            command=self._populate_reorder,  # re-queries live DB on click
         ).grid(row=0, column=1, padx=(10, 0))
 
         cols = (
-            "Part No.", "Description", "In Stock",
-            "Trigger", "On Order?", "Has Unshipped Orders", "Action Required",
+            "Part No.",
+            "Description",
+            "In Stock",
+            "Trigger",
+            "On Order?",
+            "Has Unshipped Orders",
+            "Action Required",
         )
         widths = (90, 220, 80, 70, 90, 150, 160)
 
@@ -768,8 +797,16 @@ class InventorySalesReportView(ctk.CTkFrame):
 
         if not low_stock_parts:
             tree.insert(
-                "", "end",
-                values=("—", "No parts currently at or below trigger level", "", "", "", ""),
+                "",
+                "end",
+                values=(
+                    "—",
+                    "No parts currently at or below trigger level",
+                    "",
+                    "",
+                    "",
+                    "",
+                ),
                 tags=("cheapest",),
             )
             return
@@ -777,14 +814,13 @@ class InventorySalesReportView(ctk.CTkFrame):
         rows_inserted = 0
         for part in low_stock_parts:
             part_no, desc = part[0], part[1]
-            supplier_list = sorted(
-                self.suppliers.get(part_no, []), key=lambda s: s[1]
-            )
+            supplier_list = sorted(self.suppliers.get(part_no, []), key=lambda s: s[1])
 
             if not supplier_list:
                 # Part is low-stock but has no suppliers linked — show it anyway
                 tree.insert(
-                    "", "end",
+                    "",
+                    "end",
                     values=(part_no, desc, "⚠ No supplier linked", "—", "—", "—"),
                     tags=(),
                 )
@@ -793,10 +829,11 @@ class InventorySalesReportView(ctk.CTkFrame):
 
             for i, (name, cost, phone) in enumerate(supplier_list):
                 tree.insert(
-                    "", "end",
+                    "",
+                    "end",
                     values=(
                         part_no if i == 0 else "",
-                        desc   if i == 0 else "",
+                        desc if i == 0 else "",
                         name,
                         f"₱{cost:.2f}",
                         phone,
@@ -808,15 +845,26 @@ class InventorySalesReportView(ctk.CTkFrame):
 
         if rows_inserted == 0:
             tree.insert(
-                "", "end",
-                values=("—", "No supplier data found for low-stock parts", "", "", "", ""),
+                "",
+                "end",
+                values=(
+                    "—",
+                    "No supplier data found for low-stock parts",
+                    "",
+                    "",
+                    "",
+                    "",
+                ),
                 tags=("cheapest",),
             )
 
     def _build_supplier_tab(self, parent) -> ctk.CTkFrame:
         frame = ctk.CTkFrame(
-            parent, fg_color=BG_CARD, corner_radius=10,
-            border_width=1, border_color=BORDER,
+            parent,
+            fg_color=BG_CARD,
+            corner_radius=10,
+            border_width=1,
+            border_color=BORDER,
         )
         frame.columnconfigure(0, weight=1)
 
@@ -851,8 +899,12 @@ class InventorySalesReportView(ctk.CTkFrame):
         ).grid(row=0, column=1, padx=(10, 0))
 
         cols = (
-            "Part No.", "Description", "Supplier Name",
-            "Unit Cost", "Phone", "Best Price?",
+            "Part No.",
+            "Description",
+            "Supplier Name",
+            "Unit Cost",
+            "Phone",
+            "Best Price?",
         )
         widths = (90, 200, 180, 90, 140, 100)
 
@@ -957,33 +1009,8 @@ class InventorySalesReportView(ctk.CTkFrame):
     # CSV export  — exports whatever is currently in the Overview table
     # ==================================================================
     def _export_csv(self):
-        today = datetime.date.today().strftime("%Y-%m-%d")
-        path = fd.asksaveasfilename(
-            defaultextension=".csv",
-            filetypes=[("CSV files", "*.csv")],
-            initialfile=f"inventory_report_{today}.csv",
-            title="Save Inventory Report",
-        )
-        if not path:
-            return  # user cancelled
-
-        headers = (
-            "Part No.",
-            "Description",
-            "Sell Price",
-            "In Stock",
-            "Trigger",
-            "On Order",
-            "Status",
-        )
-        try:
-            with open(path, "w", newline="", encoding="utf-8") as f:
-                writer = csv.writer(f)
-                writer.writerow(headers)
-                for iid in self._overview_tree.get_children():
-                    writer.writerow(self._overview_tree.item(iid, "values"))
-            messagebox.showinfo(
-                "Export Complete", f"Inventory report saved to:\n{path}"
-            )
-        except Exception as ex:
-            messagebox.showerror("Export Failed", str(ex))
+        rows = [
+            self._overview_tree.item(iid, "values")
+            for iid in self._overview_tree.get_children()
+        ]
+        export_inventory(self, rows)

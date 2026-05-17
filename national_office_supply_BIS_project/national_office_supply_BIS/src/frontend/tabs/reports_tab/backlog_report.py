@@ -4,11 +4,15 @@ frontend/tabs/reports_tab/backlog_report.py
 Backlog Tracking Report: Ordered parts not yet shipped (QD-Sec10)
 """
 
+import csv
 import customtkinter as ctk
 import tkinter as tk
+import tkinter.filedialog as fd
 from tkinter import ttk, messagebox
 import datetime
 from typing import TypedDict, Optional, List, Dict
+
+from .csv_tab import export_backlog
 
 try:
     import psycopg2
@@ -19,6 +23,7 @@ except ImportError:
     HAS_PSYCOPG2 = False
 
 from backend.report_service import ReportService
+from frontend.modular.date_picker import DatePickerField
 
 # ── Design tokens ────────────────────────────────────────────────────────────
 PAGE_BG = "#f0f2f5"
@@ -32,7 +37,7 @@ ACCENT_BLUE = "#3b82f6"
 
 FONT_TITLE = ("Segoe UI", 26, "bold")
 FONT_BODY = ("Segoe UI", 11)
-FONT_BTN = ("Segoe UI", 11, "bold")
+FONT_BTN = ("Segoe UI", 12, "bold")
 FONT_TBL_HDR = ("Segoe UI", 11, "bold")
 FONT_TBL_ROW = ("Segoe UI", 11)
 
@@ -144,6 +149,21 @@ class BacklogReportView(ctk.CTkFrame):
         title_row = tk.Frame(body, bg=PAGE_BG)
         title_row.pack(fill="x", padx=pad_x, pady=(8, 0))
 
+        self._nav_toggle_btn = ctk.CTkButton(
+            title_row,
+            text="◀" if self._is_navigation_visible else "▶",
+            width=30,
+            height=30,
+            corner_radius=8,
+            fg_color="#2f9e44",
+            hover_color="#2b8a3e",
+            text_color=TEXT_WHITE,
+            border_width=0,
+            font=("Segoe UI", 12, "bold"),
+            command=self._handle_nav_toggle,
+        )
+        self._nav_toggle_btn.pack(side="left", padx=(0, 10))
+
         tk.Label(
             title_row,
             text="Backlog Tracking",
@@ -157,16 +177,31 @@ class BacklogReportView(ctk.CTkFrame):
 
         ctk.CTkButton(
             btn_frame,
-            text="\u27f3  Refresh",
-            width=100,
-            height=32,
+            text="↺  Refresh",
+            width=110,
+            height=36,
             font=FONT_BTN,
-            corner_radius=7,
+            corner_radius=8,
+            fg_color="transparent",
+            hover_color="#e8f4fd",
+            text_color=ACCENT_BLUE,
+            border_width=1,
+            border_color=ACCENT_BLUE,
+            command=self._load_data,
+        ).pack(side="left", padx=(0, 8))
+
+        ctk.CTkButton(
+            btn_frame,
+            text="⬇  Export CSV",
+            width=140,
+            height=36,
+            font=FONT_BTN,
+            corner_radius=8,
             fg_color="#1e2d3d",
             hover_color="#2d3f52",
             text_color=TEXT_WHITE,
-            command=self._load_data,
-        ).pack(side="left", padx=(0, 8))
+            command=self._export_csv,
+        ).pack(side="left")
 
         # Subtitle
         self._subtitle_lbl = tk.Label(
@@ -250,13 +285,47 @@ class BacklogReportView(ctk.CTkFrame):
             search_wrap,
             textvariable=self._filter_var,
             placeholder_text="Search invoice, part, or customer\u2026",
-            width=350,
+            width=280,
             height=30,
             border_width=0,
             fg_color="#f5f6f8",
             font=FONT_BODY,
             text_color=TEXT_DARK,
         ).pack(side="left", padx=(0, 6))
+
+        # Date range filter
+        tk.Label(
+            filter_inner, text="Date:", font=FONT_BODY, bg=CARD_BG, fg=TEXT_MUTED
+        ).pack(side="left", padx=(12, 6))
+        self._from_picker = DatePickerField(
+            filter_inner,
+            width=100,
+            placeholder_text="From",
+        )
+        self._from_picker.pack(side="left", padx=(0, 4))
+
+        tk.Label(
+            filter_inner, text="to", font=FONT_BODY, bg=CARD_BG, fg=TEXT_MUTED
+        ).pack(side="left", padx=(2, 4))
+        self._to_picker = DatePickerField(
+            filter_inner,
+            width=100,
+            placeholder_text="To",
+        )
+        self._to_picker.pack(side="left", padx=(0, 8))
+
+        ctk.CTkButton(
+            filter_inner,
+            text="Load",
+            width=70,
+            height=30,
+            corner_radius=7,
+            font=("Segoe UI", 11, "bold"),
+            fg_color="#3b82f6",
+            hover_color="#2563eb",
+            text_color=TEXT_WHITE,
+            command=self._apply_filter,
+        ).pack(side="left", padx=(0, 12))
 
         self._count_lbl = tk.Label(
             filter_inner, text="\u2014 items", font=FONT_BODY, bg=CARD_BG, fg=TEXT_MUTED
@@ -323,6 +392,15 @@ class BacklogReportView(ctk.CTkFrame):
         self._tree.pack(fill="x", padx=0, pady=0)
         xsb.pack(fill="x")
 
+    def set_navigation_visibility(self, visible: bool):
+        self._is_navigation_visible = visible
+        if hasattr(self, "_nav_toggle_btn"):
+            self._nav_toggle_btn.configure(text="◀" if visible else "▶")
+
+    def _handle_nav_toggle(self):
+        if self._on_toggle_navigation:
+            self._on_toggle_navigation()
+
     def _load_data(self):
         """Load backlog data from database."""
         rows = self._fetch_from_db() or SAMPLE_BACKLOG[:]
@@ -340,7 +418,7 @@ class BacklogReportView(ctk.CTkFrame):
             return None
         try:
             rows = self._report_service.execute_query("""
-                SELECT DISTINCT
+                SELECT
                     i.invoice_id::text,
                     i.date_written::text,
                     c.customer_number,
@@ -374,8 +452,28 @@ class BacklogReportView(ctk.CTkFrame):
             return None
 
     def _apply_filter(self):
-        """Apply search filter to backlog rows."""
+        """Apply search text and date range filter to backlog rows."""
         query = self._filter_var.get().strip().lower()
+
+        def parse_date(s) -> datetime.date | None:
+            """Try multiple formats so picker output always parses correctly."""
+            if isinstance(s, datetime.datetime):
+                return s.date()
+            if isinstance(s, datetime.date):
+                return s
+            if not s:
+                return None
+            s = str(s).strip()
+            for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%d/%m/%Y", "%Y/%m/%d"):
+                try:
+                    return datetime.datetime.strptime(s[:10], fmt).date()
+                except ValueError:
+                    continue
+            return None
+
+        dt_from = parse_date(self._from_picker.get_value())
+        dt_to = parse_date(self._to_picker.get_value())
+
         filtered = []
         for row in self._all_rows:
             inv_id, date, cust_num, cust_name, part_num, desc, qty, status = row
@@ -385,6 +483,14 @@ class BacklogReportView(ctk.CTkFrame):
                 not in (str(inv_id) + str(part_num) + desc + cust_name).lower()
             ):
                 continue
+            if dt_from or dt_to:
+                row_date = parse_date(date)
+                if row_date is None:
+                    continue
+                if dt_from and row_date < dt_from:
+                    continue
+                if dt_to and row_date > dt_to:
+                    continue
             filtered.append(row)
         self._render_rows(filtered)
         self._count_lbl.configure(text=f"{len(filtered)} items")
@@ -406,6 +512,10 @@ class BacklogReportView(ctk.CTkFrame):
         self._total_orders_lbl.configure(text=str(unique_orders))
         self._total_lines_lbl.configure(text=str(total_lines))
         self._total_qty_lbl.configure(text=str(total_qty))
+
+    def _export_csv(self):
+        rows = [self._tree.item(iid, "values") for iid in self._tree.get_children()]
+        export_backlog(self, rows)
 
     def _on_filter_change(self, *args):
         """Called when filter text changes."""

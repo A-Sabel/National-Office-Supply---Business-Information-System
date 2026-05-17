@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import csv
-from datetime import datetime
-import tkinter as tk
+from datetime import datetime, timedelta
 import tkinter.filedialog as fd
 import tkinter.messagebox as messagebox
 from tkinter import ttk
@@ -14,6 +13,8 @@ import psycopg2
 
 from backend.audit_logger import ensure_audit_log_table
 from backend.report_service import ReportService
+from frontend.modular.date_picker import DatePickerField
+from .csv_tab import export_audit_log
 
 BG_PAGE = "#f0f2f5"
 BG_CARD = "#ffffff"
@@ -34,6 +35,7 @@ class AuditLogReportView(ctk.CTkFrame):
         db_config=None,
         on_toggle_navigation=None,
         is_navigation_visible=True,
+        session_manager=None,
         **kwargs,
     ):
         super().__init__(
@@ -41,9 +43,10 @@ class AuditLogReportView(ctk.CTkFrame):
         )
         self.controller = controller
         self.db_config = db_config
-        self._report_service = ReportService(
-            self.db_config or {}, getattr(controller, "session_manager", None)
+        self.session_manager = session_manager or getattr(
+            controller, "session_manager", None
         )
+        self._report_service = ReportService(self.db_config or {}, self.session_manager)
         self._rows: list[dict] = []
         self._on_toggle_navigation = on_toggle_navigation
         self._is_navigation_visible = is_navigation_visible
@@ -62,6 +65,10 @@ class AuditLogReportView(ctk.CTkFrame):
         if self._nav_toggle_btn is not None:
             self._nav_toggle_btn.configure(text="◀" if visible else "▶")
 
+    def _handle_nav_toggle(self):
+        if self._on_toggle_navigation:
+            self._on_toggle_navigation()
+
     def _build_header(self):
         hdr = ctk.CTkFrame(
             self,
@@ -73,13 +80,30 @@ class AuditLogReportView(ctk.CTkFrame):
         hdr.grid(row=0, column=0, sticky="ew", padx=18, pady=(18, 10))
         hdr.grid_columnconfigure(0, weight=1)
 
-        title = ctk.CTkLabel(
-            hdr,
+        title_row = ctk.CTkFrame(hdr, fg_color="transparent")
+        title_row.grid(row=0, column=0, sticky="w", padx=16, pady=(12, 2))
+
+        self._nav_toggle_btn = ctk.CTkButton(
+            title_row,
+            text="◀" if self._is_navigation_visible else "▶",
+            width=30,
+            height=30,
+            corner_radius=8,
+            fg_color="#2f9e44",
+            hover_color="#2b8a3e",
+            text_color="white",
+            border_width=0,
+            font=("Segoe UI", 12, "bold"),
+            command=self._handle_nav_toggle,
+        )
+        self._nav_toggle_btn.pack(side="left", padx=(0, 10))
+
+        ctk.CTkLabel(
+            title_row,
             text="Audit Log",
             font=("Segoe UI", 22, "bold"),
             text_color=TEXT_DARK,
-        )
-        title.grid(row=0, column=0, sticky="w", padx=16, pady=(12, 2))
+        ).pack(side="left")
 
         subtitle = ctk.CTkLabel(
             hdr,
@@ -87,55 +111,128 @@ class AuditLogReportView(ctk.CTkFrame):
             font=("Segoe UI", 11),
             text_color=TEXT_MUTED,
         )
-        subtitle.grid(row=1, column=0, sticky="w", padx=16, pady=(0, 10))
+        subtitle.grid(row=1, column=0, sticky="w", padx=16, pady=(0, 12))
 
+        # ── Filter Row: Labels and Fields ────────────────────────────────────
         filter_row = ctk.CTkFrame(hdr, fg_color="transparent")
-        filter_row.grid(row=2, column=0, sticky="ew", padx=12, pady=(0, 12))
-        for idx in range(6):
-            filter_row.grid_columnconfigure(idx, weight=1 if idx < 4 else 0)
+        filter_row.grid(row=2, column=0, sticky="ew", padx=16, pady=(0, 12))
+
+        # Configure columns: 4 filter fields + 2 buttons
+        filter_row.grid_columnconfigure(0, weight=2)  # Action
+        filter_row.grid_columnconfigure(1, weight=2)  # Employee
+        filter_row.grid_columnconfigure(2, weight=1)  # From
+        filter_row.grid_columnconfigure(3, weight=1)  # To
+        filter_row.grid_columnconfigure(4, weight=0, minsize=10)  # Spacing
+        filter_row.grid_columnconfigure(5, weight=0)  # Buttons
 
         self.action_var = ctk.StringVar(value="All Actions")
         self.actor_var = ctk.StringVar()
         self.from_var = ctk.StringVar()
         self.to_var = ctk.StringVar()
 
+        # ── Row 0: Labels ────
+        ctk.CTkLabel(
+            filter_row,
+            text="What happened:",
+            font=("Segoe UI", 9),
+            text_color=TEXT_MUTED,
+        ).grid(row=0, column=0, sticky="w", padx=4, pady=(0, 4))
+
+        ctk.CTkLabel(
+            filter_row,
+            text="By Employee ID:",
+            font=("Segoe UI", 9),
+            text_color=TEXT_MUTED,
+        ).grid(row=0, column=1, sticky="w", padx=4, pady=(0, 4))
+
+        ctk.CTkLabel(
+            filter_row,
+            text="Date Range:",
+            font=("Segoe UI", 9),
+            text_color=TEXT_MUTED,
+        ).grid(row=0, column=2, columnspan=2, sticky="w", padx=4, pady=(0, 4))
+
+        # ── Row 1: Input Fields ────
         self.action_combo = ctk.CTkComboBox(
             filter_row,
             values=[
                 "All Actions",
-                "PRICE_UPDATE",
-                "PAYROLL_ISSUED",
-                "INVOICE_SHIPPED",
-                "BALANCE_UPDATE",
+                "Price Changed",
+                "Payroll Issued",
+                "Invoice Shipped",
+                "Balance Changed",
             ],
             variable=self.action_var,
+            height=36,
         )
-        self.action_combo.grid(row=0, column=0, sticky="ew", padx=4)
+        self.action_combo.grid(row=1, column=0, sticky="ew", padx=4, pady=0)
 
         actor_entry = ctk.CTkEntry(
-            filter_row, textvariable=self.actor_var, placeholder_text="Actor ID"
-        )
-        actor_entry.grid(row=0, column=1, sticky="ew", padx=4)
-
-        from_entry = ctk.CTkEntry(
-            filter_row, textvariable=self.from_var, placeholder_text="From YYYY-MM-DD"
-        )
-        from_entry.grid(row=0, column=2, sticky="ew", padx=4)
-
-        to_entry = ctk.CTkEntry(
-            filter_row, textvariable=self.to_var, placeholder_text="To YYYY-MM-DD"
-        )
-        to_entry.grid(row=0, column=3, sticky="ew", padx=4)
-
-        ctk.CTkButton(
-            filter_row, text="Refresh", fg_color=ACCENT_BLUE, command=self._load_logs
-        ).grid(row=0, column=4, padx=4)
-        ctk.CTkButton(
             filter_row,
-            text="Export CSV",
-            fg_color=ACCENT_GREEN,
+            textvariable=self.actor_var,
+            placeholder_text="Leave blank for all",
+            height=36,
+        )
+        actor_entry.grid(row=1, column=1, sticky="ew", padx=4, pady=0)
+
+        self.from_picker = DatePickerField(
+            filter_row,
+            default_date=(datetime.now().date() - timedelta(days=6)),
+            on_change=self._on_from_date_selected,
+            width=150,
+        )
+        self.from_picker.grid(row=1, column=2, sticky="ew", padx=(4, 2), pady=0)
+        self.from_var.set(self.from_picker.get_value())
+
+        self.to_picker = DatePickerField(
+            filter_row,
+            default_date=datetime.now().date(),
+            on_change=self._on_to_date_selected,
+            width=150,
+        )
+        self.to_picker.grid(row=1, column=3, sticky="ew", padx=(2, 4), pady=0)
+        self.to_var.set(self.to_picker.get_value())
+
+        # ── Buttons ────
+        btn_frame = ctk.CTkFrame(filter_row, fg_color="transparent")
+        btn_frame.grid(row=1, column=5, sticky="e", padx=(8, 0))
+        btn_frame.grid_columnconfigure(0, weight=0)
+        btn_frame.grid_columnconfigure(1, weight=0)
+
+        ctk.CTkButton(
+            btn_frame,
+            text="↺ Refresh",
+            width=95,
+            height=36,
+            corner_radius=8,
+            fg_color="transparent",
+            hover_color="#e8f4fd",
+            text_color=ACCENT_BLUE,
+            border_width=1,
+            border_color=ACCENT_BLUE,
+            font=("Segoe UI", 11, "bold"),
+            command=self._load_logs,
+        ).grid(row=0, column=0, padx=2)
+
+        ctk.CTkButton(
+            btn_frame,
+            text="⬇ Export CSV",
+            width=110,
+            height=36,
+            font=("Segoe UI", 11, "bold"),
+            fg_color="#1e2d3d",
+            hover_color="#2d3f52",
             command=self._export_csv,
-        ).grid(row=0, column=5, padx=4)
+            text_color="white",
+        ).grid(row=0, column=1, padx=2)
+
+    def _on_from_date_selected(self, selected_date):
+        self.from_var.set(selected_date.strftime("%Y-%m-%d"))
+        self._load_logs()
+
+    def _on_to_date_selected(self, selected_date):
+        self.to_var.set(selected_date.strftime("%Y-%m-%d"))
+        self._load_logs()
 
     def _build_table(self):
         card = ctk.CTkFrame(
@@ -209,8 +306,15 @@ class AuditLogReportView(ctk.CTkFrame):
 
             action = self.action_var.get().strip()
             if action and action != "All Actions":
+                action_map = {
+                    "Price Changed": "PRICE_UPDATE",
+                    "Payroll Issued": "PAYROLL_ISSUED",
+                    "Invoice Shipped": "INVOICE_SHIPPED",
+                    "Balance Changed": "BALANCE_UPDATE",
+                }
+                action_code = action_map.get(action, action)
                 sql += " AND action_type = %s"
-                params.append(action)
+                params.append(action_code)
 
             actor_text = self.actor_var.get().strip()
             if actor_text:
@@ -234,40 +338,74 @@ class AuditLogReportView(ctk.CTkFrame):
         except Exception as e:
             messagebox.showerror("Audit Log", f"Could not load audit logs:\n{e}")
 
+    def _format_details(self, action_type: str, details_json: str) -> str:
+        """Convert technical JSON details into human-readable text."""
+        try:
+            import json
+
+            if not details_json:
+                return ""
+            details = (
+                json.loads(details_json)
+                if isinstance(details_json, str)
+                else details_json
+            )
+        except:
+            return str(details_json)
+
+        if action_type == "PRICE_UPDATE":
+            old = details.get("old_price", "")
+            new = details.get("new_price", "")
+            return f"Price changed from ₱{old} to ₱{new}"
+
+        elif action_type == "INVOICE_SHIPPED":
+            return "Invoice marked as shipped"
+
+        elif action_type == "BALANCE_UPDATE":
+            old = details.get("old_balance", "")
+            new = details.get("new_balance", "")
+            reason = details.get("reason", "balance update")
+            return f"Balance changed from ₱{old} to ₱{new} ({reason})"
+
+        elif action_type == "PAYROLL_ISSUED":
+            amount = details.get("amount", "")
+            emp_count = details.get("employee_count", "")
+            if emp_count:
+                return f"Payroll issued for {emp_count} employees"
+            elif amount:
+                return f"Payroll issued: ₱{amount}"
+            return "Payroll issued"
+
+        return str(details)
+
+    def _format_action_type(self, action_type: str) -> str:
+        """Convert technical action codes to user-friendly names."""
+        action_map = {
+            "PRICE_UPDATE": "Price Changed",
+            "PAYROLL_ISSUED": "Payroll Issued",
+            "INVOICE_SHIPPED": "Invoice Shipped",
+            "BALANCE_UPDATE": "Balance Changed",
+        }
+        return action_map.get(action_type, action_type)
+
     def _render_rows(self, rows):
         for item in self.tree.get_children():
             self.tree.delete(item)
         for row in rows:
+            action_type = row.get("action_type", "")
+            details = row.get("details", "")
             self.tree.insert(
                 "",
                 "end",
                 values=(
                     row.get("timestamp"),
-                    row.get("action_type"),
+                    self._format_action_type(action_type),
                     row.get("actor_id"),
                     row.get("target_table"),
                     row.get("target_id"),
-                    row.get("details"),
+                    self._format_details(action_type, details),
                 ),
             )
 
     def _export_csv(self):
-        if not self._rows:
-            messagebox.showinfo("Audit Log", "No rows to export.")
-            return
-        filepath = fd.asksaveasfilename(
-            defaultextension=".csv",
-            filetypes=[("CSV files", "*.csv")],
-            initialfile=f"audit_log_{datetime.now().strftime('%Y-%m-%d')}.csv",
-            title="Save Audit Log CSV",
-        )
-        if not filepath:
-            return
-        try:
-            with open(filepath, "w", newline="", encoding="utf-8") as f:
-                writer = csv.DictWriter(f, fieldnames=self._rows[0].keys())
-                writer.writeheader()
-                writer.writerows(self._rows)
-            messagebox.showinfo("Audit Log", f"Exported audit logs to:\n{filepath}")
-        except Exception as e:
-            messagebox.showerror("Audit Log", f"Could not export CSV:\n{e}")
+        export_audit_log(self, self._rows)

@@ -29,6 +29,8 @@ except ImportError:
     HAS_PSYCOPG2 = False
 
 from backend.report_service import ReportService
+from frontend.modular.date_picker import DatePickerField
+from .csv_tab import export_weekly_sales
 
 # ── Design tokens (extracted directly from screenshot) ────────────────────
 PAGE_BG = "#f0f2f5"  # page / scrollable frame bg
@@ -74,7 +76,7 @@ FONT_CARD_LBL = ("Segoe UI", 13)
 FONT_CARD_SUB = ("Segoe UI", 10)
 FONT_BODY = ("Segoe UI", 11)
 FONT_SMALL = ("Segoe UI", 10)
-FONT_BTN = ("Segoe UI", 11, "bold")
+FONT_BTN = ("Segoe UI", 12, "bold")
 FONT_TBL_HDR = ("Segoe UI", 11, "bold")
 FONT_TBL_ROW = ("Segoe UI", 11)
 FONT_TAB_ACT = ("Segoe UI", 12, "bold")
@@ -188,7 +190,7 @@ class WeeklySalesReportView(ctk.CTkScrollableFrame):
         self._on_toggle_navigation = on_toggle_navigation
         self._is_navigation_visible = is_navigation_visible
         self._report_service = ReportService(
-            self.db_config or {}, getattr(controller, "session_manager", None)
+            dict(self.db_config or {}), getattr(controller, "session_manager", None)
         )
         self._all_rows = []
         self._week_end = "2006-08-09"
@@ -251,20 +253,6 @@ class WeeklySalesReportView(ctk.CTkScrollableFrame):
 
         ctk.CTkButton(
             right,
-            text="🖨  Print",
-            width=100,
-            height=36,
-            corner_radius=8,
-            fg_color=CARD_BG,
-            text_color=TEXT_DARK,
-            hover_color="#f0f0f0",
-            border_width=1,
-            border_color=BORDER,
-            font=FONT_BODY,
-        ).pack(side="left", padx=(0, 10))
-
-        ctk.CTkButton(
-            right,
             text="⬇  Export CSV",
             width=140,
             height=36,
@@ -274,7 +262,22 @@ class WeeklySalesReportView(ctk.CTkScrollableFrame):
             text_color=TEXT_WHITE,
             font=FONT_BTN,
             command=self._export_csv,
-        ).pack(side="left")
+        ).pack(side="right")
+
+        ctk.CTkButton(
+            right,
+            text="↺  Refresh",
+            width=110,
+            height=36,
+            corner_radius=8,
+            fg_color="transparent",
+            hover_color="#e8f4fd",
+            text_color="#3498db",
+            border_width=1,
+            border_color="#3498db",
+            font=FONT_BTN,
+            command=self._load_week,
+        ).pack(side="right", padx=(0, 10))
 
     def _handle_nav_toggle(self):
         if callable(self._on_toggle_navigation):
@@ -410,19 +413,14 @@ class WeeklySalesReportView(ctk.CTkScrollableFrame):
         ctk.CTkLabel(
             inner, text="Week ending:", font=FONT_BODY, text_color=TEXT_MUTED
         ).pack(side="left")
-        self._week_var = ctk.StringVar(value=self._week_end)
-        ctk.CTkEntry(
+        self._week_field = DatePickerField(
             inner,
-            textvariable=self._week_var,
+            default_date=datetime.datetime.strptime(self._week_end, "%Y-%m-%d").date(),
             width=110,
-            height=34,
-            corner_radius=6,
-            fg_color=SEARCH_BG,
-            text_color=TEXT_DARK,
-            border_color=BORDER,
-            border_width=1,
-            font=FONT_BODY,
-        ).pack(side="left", padx=(6, 6))
+            on_change=lambda _date: self._load_week(),
+        )
+        self._week_field.pack(side="left", padx=(6, 6))
+        self._week_var = self._week_field.variable
         ctk.CTkButton(
             inner,
             text="Load",
@@ -912,7 +910,7 @@ class WeeklySalesReportView(ctk.CTkScrollableFrame):
         tree.heading(col, command=lambda: self._sort(tree, col, not reverse))
 
     def _load_week(self):
-        self._week_end = self._week_var.get().strip() or self._week_end
+        self._week_end = self._week_field.get_value().strip() or self._week_end
         if hasattr(self, "_subtitle"):
             self._subtitle.configure(
                 text=(f"Week ending  {self._week_end}" "  ·  National Office Supplies")
@@ -920,33 +918,8 @@ class WeeklySalesReportView(ctk.CTkScrollableFrame):
         self.load_data()
 
     def _export_csv(self):
-        import csv
-        import tkinter.filedialog as fd
-
-        path = fd.asksaveasfilename(
-            defaultextension=".csv",
-            filetypes=[("CSV files", "*.csv")],
-            initialfile=f"weekly_sales_{self._week_end}.csv",
-        )
-        if not path:
-            return
-        headers = (
-            "Rep ID",
-            "Rep Name",
-            "Total Sales",
-            "# Invoices",
-            "Largest Sale",
-            "Avg Sale",
-            "# Customers",
-            "Commission",
-            "Week Ending",
-        )
-        try:
-            with open(path, "w", newline="", encoding="utf-8") as f:
-                w = csv.writer(f)
-                w.writerow(headers)
-                for iid in self._overview_tree.get_children():
-                    w.writerow(self._overview_tree.item(iid, "values"))
-            messagebox.showinfo("Export Complete", f"Saved to:\n{path}")
-        except Exception as ex:
-            messagebox.showerror("Export Failed", str(ex))
+        rows = [
+            self._overview_tree.item(iid, "values")
+            for iid in self._overview_tree.get_children()
+        ]
+        export_weekly_sales(self, rows)

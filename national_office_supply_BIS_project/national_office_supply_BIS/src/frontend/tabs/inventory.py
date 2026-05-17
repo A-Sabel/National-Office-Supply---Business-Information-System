@@ -7,6 +7,7 @@ from decimal import Decimal
 
 from backend.part_service import PartService
 from backend.supplier_cost_service import SupplierCostService
+from frontend.modular.date_picker import DatePickerField
 
 from utils.id_formatter import (
     fmt_part,
@@ -116,7 +117,9 @@ class InventoryKPIBar(ctk.CTkFrame):
 #  INVENTORY VIEW (Main)
 # ══════════════════════════════════════════════════════════════════════════════
 class InventoryView(ctk.CTkFrame):
-    def __init__(self, parent, controller=None, db_config=None, **kwargs):
+    def __init__(
+        self, parent, controller=None, db_config=None, session_manager=None, **kwargs
+    ):
         super().__init__(
             parent, fg_color=PAGE_BG, corner_radius=0, border_width=0, **kwargs
         )
@@ -125,7 +128,9 @@ class InventoryView(ctk.CTkFrame):
 
         session = getattr(self.controller, "session", None)
         self.role = getattr(session, "role", None) or "Manager"
-        self._session_manager = getattr(controller, "session_manager", None)
+        self._session_manager = session_manager or getattr(
+            controller, "session_manager", None
+        )
         self._part_service = PartService(self.db_config or {}, self._session_manager)
         self._supplier_cost_service = SupplierCostService(
             self.db_config or {}, self._session_manager
@@ -463,7 +468,7 @@ class InventoryView(ctk.CTkFrame):
             )
             self.supp_part_combo.configure(values=part_options)
 
-        self._refresh_reorder_part_options()  
+        self._refresh_reorder_part_options()
 
     def _build_parts_table(self, parent):
         style = ttk.Style()
@@ -961,7 +966,7 @@ class InventoryView(ctk.CTkFrame):
             entry.pack(padx=20)
             return entry
 
-        desc_entry  = make_entry("Description *", "e.g. Ballpoint Pen - Red")
+        desc_entry = make_entry("Description *", "e.g. Ballpoint Pen - Red")
         price_entry = make_entry("Selling Price (₱) *", "e.g. 15.00")
         stock_entry = make_entry("Initial Stock", "e.g. 0")
         thresh_entry = make_entry("Low Stock Threshold", "e.g. 50")
@@ -972,9 +977,9 @@ class InventoryView(ctk.CTkFrame):
         status_label.pack(anchor="w", padx=20, pady=(10, 0))
 
         def save_part():
-            desc       = desc_entry.get().strip()
-            price_str  = price_entry.get().strip()
-            stock_str  = stock_entry.get().strip() or "0"
+            desc = desc_entry.get().strip()
+            price_str = price_entry.get().strip()
+            stock_str = stock_entry.get().strip() or "0"
             thresh_str = thresh_entry.get().strip() or "0"
 
             # 1. Validation
@@ -985,8 +990,8 @@ class InventoryView(ctk.CTkFrame):
                 return
 
             try:
-                price  = float(price_str)
-                stock  = int(stock_str)
+                price = float(price_str)
+                stock = int(stock_str)
                 thresh = int(thresh_str)
                 if price < 0 or stock < 0 or thresh < 0:
                     raise ValueError
@@ -1000,7 +1005,7 @@ class InventoryView(ctk.CTkFrame):
             # 2. Database Insert
             try:
                 conn = psycopg2.connect(**(self.db_config or {}))
-                cur  = conn.cursor()
+                cur = conn.cursor()
 
                 cur.execute("""
                     SELECT setval(
@@ -1017,7 +1022,13 @@ class InventoryView(ctk.CTkFrame):
                     VALUES (%s, %s, %s, %s, %s, FALSE)
                     RETURNING part_number
                     """,
-                    (desc, price, stock, thresh, thresh),  # restock_value defaults to trigger_amount
+                    (
+                        desc,
+                        price,
+                        stock,
+                        thresh,
+                        thresh,
+                    ),  # restock_value defaults to trigger_amount
                 )
                 new_part_number = cur.fetchone()[0]
                 conn.commit()
@@ -1135,17 +1146,15 @@ class InventoryView(ctk.CTkFrame):
             self.reorder_sku.configure(values=self.reorder_part_options)
 
         if hasattr(self, "po_part_combo"):
-            self.po_part_combo.configure(
-                values=[r[1] for r in self._parts_rows]
-            )
+            self.po_part_combo.configure(values=[r[1] for r in self._parts_rows])
 
     def _open_edit_part_dialog(self, sku, values):
         raw_id, display_id, desc, _, stock, threshold, price_str, supplier, _ = values
 
         dialog = ctk.CTkToplevel(self)
         dialog.title(f"Edit Part — {display_id}")
-        dialog.geometry("420x460")          # ← was 380, now 460 to fit all fields + buttons
-        dialog.minsize(420, 460)            # ← prevent user resizing below content height
+        dialog.geometry("420x460")  # ← was 380, now 460 to fit all fields + buttons
+        dialog.minsize(420, 460)  # ← prevent user resizing below content height
         dialog.grab_set()
         dialog.focus()
 
@@ -1195,10 +1204,10 @@ class InventoryView(ctk.CTkFrame):
         status_label = ctk.CTkLabel(
             dialog, text="", font=FONT_SMALL, text_color=ACCENT_GREEN
         )
-        status_label.pack(anchor="w", padx=20, pady=(8, 4))   # ← added bottom pady
+        status_label.pack(anchor="w", padx=20, pady=(8, 4))  # ← added bottom pady
 
         def save():
-            new_desc      = desc_entry.get().strip()
+            new_desc = desc_entry.get().strip()
             new_price_str = price_entry.get().strip()
             new_stock_str = stock_entry.get().strip()
             new_thresh_str = threshold_entry.get().strip()
@@ -1208,8 +1217,8 @@ class InventoryView(ctk.CTkFrame):
                     text="✗ Description cannot be empty.", text_color=ACCENT_RED
                 )
             try:
-                new_price  = float(new_price_str)
-                new_stock  = int(new_stock_str)
+                new_price = float(new_price_str)
+                new_stock = int(new_stock_str)
                 new_thresh = int(new_thresh_str)
                 if new_price < 0 or new_stock < 0 or new_thresh < 0:
                     raise ValueError
@@ -1236,7 +1245,7 @@ class InventoryView(ctk.CTkFrame):
                     )
                 else:
                     conn = psycopg2.connect(**(self.db_config or {}))
-                    cur  = conn.cursor()
+                    cur = conn.cursor()
                     cur.execute(
                         "UPDATE parts SET description=%s, selling_price=%s, "
                         "stock_count=%s, trigger_amount=%s WHERE part_number=%s",
@@ -1246,7 +1255,9 @@ class InventoryView(ctk.CTkFrame):
                     cur.close()
                     conn.close()
 
-                status_label.configure(text="✓ Saved successfully.", text_color=ACCENT_GREEN)
+                status_label.configure(
+                    text="✓ Saved successfully.", text_color=ACCENT_GREEN
+                )
                 self.refresh_catalog_data()
                 dialog.after(800, dialog.destroy)
 
@@ -1255,7 +1266,9 @@ class InventoryView(ctk.CTkFrame):
 
         # ── Button row — pinned at the bottom with enough top padding ──
         btn_row = ctk.CTkFrame(dialog, fg_color="transparent")
-        btn_row.pack(fill="x", padx=20, pady=(8, 20))       # ← pady bottom 20 keeps it visible
+        btn_row.pack(
+            fill="x", padx=20, pady=(8, 20)
+        )  # ← pady bottom 20 keeps it visible
 
         ctk.CTkButton(
             btn_row,
@@ -1435,13 +1448,13 @@ class InventoryView(ctk.CTkFrame):
 
         # FIXED — extract raw part_number from the reorder tree
         vals = reorder_tree.item(selected[0])["values"]
-        po_id      = vals[0]   # raw po_number integer
-        po_disp    = vals[1]   # formatted PO display
+        po_id = vals[0]  # raw po_number integer
+        po_disp = vals[1]  # formatted PO display
         part_id_raw = vals[2]  # raw part_number INTEGER ← now correct
-        part_disp  = vals[3]   # "PN-0019" for display only
-        desc       = vals[4]
-        supplier   = vals[5]
-        qty        = int(vals[6])
+        part_disp = vals[3]  # "PN-0019" for display only
+        desc = vals[4]
+        supplier = vals[5]
+        qty = int(vals[6])
 
         # Status is now index 9
         if vals[9] == "Received":
@@ -1450,7 +1463,7 @@ class InventoryView(ctk.CTkFrame):
                 "This order has already been processed and added to stock.",
             )
 
-        # Prevent receiving an already received order
+            # Prevent receiving an already received order
             if vals[8] == "Received":
                 import tkinter.messagebox as messagebox
 
@@ -1480,16 +1493,15 @@ class InventoryView(ctk.CTkFrame):
         ).pack(pady=(0, 20), padx=20, anchor="w")
 
         # Form Fields
-        ctk.CTkLabel(
-            dialog, text="Date Received *", font=("Segoe UI", 11), text_color=TEXT_MUTED
-        ).pack(anchor="w", padx=20, pady=(5, 2))
-
         import datetime
 
-        today_str = datetime.datetime.now().strftime("%Y-%m-%d")
-        date_entry = ctk.CTkEntry(dialog, width=410, height=34)
-        date_entry.insert(0, today_str)
-        date_entry.pack(padx=20)
+        self._date_received_picker = DatePickerField(
+            dialog,
+            label="Date Received *",
+            default_date=datetime.datetime.now().date(),
+            width=410,
+        )
+        self._date_received_picker.pack(fill="x", padx=20)
 
         ctk.CTkLabel(
             dialog,
@@ -1504,7 +1516,7 @@ class InventoryView(ctk.CTkFrame):
 
         # Submit Function
         def confirm_receipt():
-            date_val = date_entry.get().strip()
+            date_val = self._date_received_picker.get_value().strip()
             receipt_val = receipt_entry.get().strip() or "N/A"
 
             if not date_val:
@@ -1518,12 +1530,12 @@ class InventoryView(ctk.CTkFrame):
 
                 # 1. Update the Purchase Order
                 cur.execute(
-                """
+                    """
                 UPDATE purchase_orders 
                 SET received = TRUE
                 WHERE po_number = %s
             """,
-                (po_id,),
+                    (po_id,),
                 )
                 # 2. Add the items physically back into stock!
                 cur.execute(
@@ -1864,8 +1876,8 @@ class InventoryView(ctk.CTkFrame):
         ro_cols = (
             "_raw_id",
             "PO Number",
-            "Part ID",        
-            "Part Display",     
+            "Part ID",
+            "Part Display",
             "Part Description",
             "Supplier",
             "Qty",
@@ -2276,8 +2288,19 @@ class InventoryView(ctk.CTkFrame):
             return messagebox.showwarning("Selection", "Select a supplier to delete.")
 
         vals = supp_tree.item(selected[0])["values"]
-        supplier_id  = vals[0]   # raw integer PK
+
+        supplier_id = vals[0]  # raw integer PK
         supplier_name = vals[2]  # company name for display
+
+        # Warn the user that linked parts will also be unlinked
+        confirm = messagebox.askyesno(
+            "Confirm Delete",
+            f"Delete supplier '{supplier_name}'?\n\n"
+            "This will also remove all part-cost links for this supplier from the catalog.\n\n"
+            "This cannot be undone.",
+        )
+        if not confirm:
+            return
 
         try:
             conn = psycopg2.connect(**(self.db_config or {}))
@@ -2328,7 +2351,9 @@ class InventoryView(ctk.CTkFrame):
             cur.close()
             conn.close()
 
-            messagebox.showinfo("Deleted", f"Supplier '{supplier_name}' has been removed.")
+            messagebox.showinfo(
+                "Deleted", f"Supplier '{supplier_name}' has been removed."
+            )
             self._load_supplier_list()
             self._load_reorder_list()
             self._load_reorder_candidates()
@@ -2608,16 +2633,18 @@ class InventoryView(ctk.CTkFrame):
                     "",
                     "end",
                     values=(
-                        r["po_number"],                               # [0] hidden raw PO id
-                        fmt_purchase_order(r["po_number"], r["company_name"]),  # [1] PO display
-                        r["part_number"],                             # [2] raw integer part_number ← FIXED
-                        fmt_part(r["part_number"]),                   # [3] "PN-0019" display
-                        r["description"],                             # [4]
-                        r["company_name"],                            # [5]
-                        r["quantity_ordered"],                        # [6]
-                        f"₱{float(cost):,.2f}",                      # [7]
-                        f"₱{float(total):,.2f}",                     # [8]
-                        r["status"],                                  # [9]
+                        r["po_number"],  # [0] hidden raw PO id
+                        fmt_purchase_order(
+                            r["po_number"], r["company_name"]
+                        ),  # [1] PO display
+                        r["part_number"],  # [2] raw integer part_number ← FIXED
+                        fmt_part(r["part_number"]),  # [3] "PN-0019" display
+                        r["description"],  # [4]
+                        r["company_name"],  # [5]
+                        r["quantity_ordered"],  # [6]
+                        f"₱{float(cost):,.2f}",  # [7]
+                        f"₱{float(total):,.2f}",  # [8]
+                        r["status"],  # [9]
                     ),
                 )
         except Exception as e:

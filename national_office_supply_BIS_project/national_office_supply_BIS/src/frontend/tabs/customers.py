@@ -10,16 +10,15 @@ from backend.payment_service import PaymentService
 
 
 class CustomersView(ctk.CTkFrame):
-    def __init__(self, parent, controller, db_config):
+    def __init__(self, parent, controller, db_config, session_manager=None):
         super().__init__(parent, fg_color="#f8f9fa")
         self.controller = controller
         self.db_config = db_config
-        self._customer_svc = CustomerService(
-            db_config, getattr(controller, "session_manager", None)
+        self.session_manager = session_manager or getattr(
+            controller, "session_manager", None
         )
-        self._payment_svc = PaymentService(
-            db_config, getattr(controller, "session_manager", None)
-        )
+        self._customer_svc = CustomerService(db_config, self.session_manager)
+        self._payment_svc = PaymentService(db_config, self.session_manager)
         self.base_rows = []
         self.active_filter = "all"
         self.filter_buttons = {}

@@ -4,8 +4,10 @@ National Office Supplies BIS — Stock Ordering Report
 Covers: QD-Sec6, QD-Sec13
 """
 
+import csv
 import customtkinter as ctk
 import tkinter as tk
+import tkinter.filedialog as fd
 from tkinter import ttk, messagebox
 import datetime
 from typing import Literal, TypedDict
@@ -18,6 +20,8 @@ except ImportError:
     HAS_PSYCOPG2 = False
 
 from backend.report_service import ReportService
+from frontend.modular.date_picker import DatePickerField
+from .csv_tab import export_stock_ordering
 
 # ── Design tokens ────────────────────────────────────────────────────────────
 PAGE_BG = "#f0f2f5"
@@ -45,7 +49,7 @@ FONT_CARD_N = ("Segoe UI", 32, "bold")
 FONT_CARD_L = ("Segoe UI", 13)
 FONT_CARD_S = ("Segoe UI", 10)
 FONT_BODY = ("Segoe UI", 11)
-FONT_BTN = ("Segoe UI", 11, "bold")
+FONT_BTN = ("Segoe UI", 12, "bold")
 FONT_TBL_HDR = ("Segoe UI", 11, "bold")
 FONT_TBL_ROW = ("Segoe UI", 11)
 
@@ -259,12 +263,22 @@ class StockOrderingReportView(ctk.CTkFrame):
         ("order_status", "Order Status", 140, "center"),
     )
 
-    def __init__(self, parent, controller=None, db_config=None, **kw):
+    def __init__(
+        self,
+        parent,
+        controller=None,
+        db_config=None,
+        on_toggle_navigation=None,
+        is_navigation_visible=True,
+        **kw,
+    ):
         super().__init__(
             parent, fg_color=PAGE_BG, corner_radius=0, border_width=0, **kw
         )
         self.controller = controller
         self.db_config = db_config
+        self._on_toggle_navigation = on_toggle_navigation
+        self._is_navigation_visible = is_navigation_visible
         self._all_rows = []
         self._filter_var = tk.StringVar()
         self._filter_var.trace_add("write", self._on_filter_change)
@@ -292,6 +306,15 @@ class StockOrderingReportView(ctk.CTkFrame):
         self._build_body()
         self._load_data()
 
+    def set_navigation_visibility(self, visible: bool):
+        self._is_navigation_visible = visible
+        if hasattr(self, "_nav_toggle_btn"):
+            self._nav_toggle_btn.configure(text="◀" if visible else "▶")
+
+    def _handle_nav_toggle(self):
+        if self._on_toggle_navigation:
+            self._on_toggle_navigation()
+
     def _part_label(self, part_number):
         try:
             return f"P-{int(part_number):04d}"
@@ -306,6 +329,21 @@ class StockOrderingReportView(ctk.CTkFrame):
         title_row = tk.Frame(body, bg=PAGE_BG)
         title_row.pack(fill="x", padx=28, pady=(8, 0))
 
+        self._nav_toggle_btn = ctk.CTkButton(
+            title_row,
+            text="◀" if self._is_navigation_visible else "▶",
+            width=30,
+            height=30,
+            corner_radius=8,
+            fg_color="#2f9e44",
+            hover_color="#2b8a3e",
+            text_color=TEXT_WHITE,
+            border_width=0,
+            font=("Segoe UI", 12, "bold"),
+            command=self._handle_nav_toggle,
+        )
+        self._nav_toggle_btn.pack(side="left", padx=(0, 10))
+
         tk.Label(
             title_row,
             text="Stock Ordering Report",
@@ -319,16 +357,31 @@ class StockOrderingReportView(ctk.CTkFrame):
 
         ctk.CTkButton(
             btn_frame,
-            text="\u27f3  Refresh",
-            width=100,
-            height=32,
+            text="↺  Refresh",
+            width=110,
+            height=36,
+            corner_radius=8,
+            fg_color="transparent",
+            hover_color="#e8f4fd",
+            text_color=C_BLUE,
+            border_width=1,
+            border_color=C_BLUE,
             font=FONT_BTN,
-            corner_radius=7,
-            fg_color="#1e2d3d",
-            hover_color="#2d3f52",
-            text_color=TEXT_WHITE,
             command=self._load_data,
         ).pack(side="left", padx=(0, 8))
+
+        ctk.CTkButton(
+            btn_frame,
+            text="⬇  Export CSV",
+            width=140,
+            height=36,
+            corner_radius=8,
+            fg_color=TABLE_HDR_BG,
+            hover_color="#2d3f52",
+            text_color=TEXT_WHITE,
+            font=FONT_BTN,
+            command=self._export_csv,
+        ).pack(side="left")
 
         # Subtitle
         self._subtitle_lbl = tk.Label(
@@ -421,7 +474,6 @@ class StockOrderingReportView(ctk.CTkFrame):
             dropdown_text_color=TEXT_DARK,
             command=lambda _: self._apply_filter(),
         ).pack(side="left", padx=10)
-
         self._count_lbl = tk.Label(
             filter_inner, text="\u2014 items", font=FONT_BODY, bg=CARD_BG, fg=TEXT_MUTED
         )
@@ -703,6 +755,16 @@ class StockOrderingReportView(ctk.CTkFrame):
             ctk.CTkLabel(card, text=sub, font=FONT_CARD_S, text_color=TEXT_MUTED).pack(
                 anchor="w", padx=16, pady=(0, 14)
             )
+
+    # ── CSV export ────────────────────────────────────────────────────────────
+
+    def _export_csv(self):
+        items = self._tree.get_children()
+        if not items:
+            return
+        rows = [self._tree.item(iid, "values") for iid in items]
+        headers = [self._tree.heading(c[0])["text"] for c in self.COLUMNS]
+        export_stock_ordering(self, rows, headers)
 
     # ── Column sort ───────────────────────────────────────────────────────────
 

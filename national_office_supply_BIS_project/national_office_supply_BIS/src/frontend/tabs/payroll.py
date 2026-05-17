@@ -5,6 +5,7 @@ from datetime import datetime, date, timedelta
 from backend.employee_service import EmployeeService
 from backend.audit_logger import write_audit_log
 from backend.timecard_service import TimecardService
+from frontend.modular.date_picker import DatePickerField
 
 try:
     import psycopg2
@@ -33,7 +34,7 @@ def auto_generate_timecards(db_config):
         return
 
     today = date.today()
-    week = today - timedelta(days=today.weekday())  # Monday
+    week = today - timedelta(days=today.weekday()) + timedelta(days=5)  # Saturday
 
     try:
         conn = _get_conn(db_config)
@@ -85,6 +86,61 @@ def auto_generate_timecards(db_config):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Reusable sort / filter helpers for ttk.Treeview
+# ─────────────────────────────────────────────────────────────────────────────
+def _make_sortable(tree, columns, *, numeric_cols=None, currency_cols=None):
+    """
+    Attach click-to-sort to every heading in *tree*.
+    Shows ⇅ on all sortable columns by default; ▲/▼ after clicking.
+
+    - numeric_cols  : set of col names whose values should be sorted as float
+                      (strips leading non-numeric chars like 'P', spaces).
+    - currency_cols : alias for numeric_cols (merged together).
+    Returns a dict  _sort_state = {col: bool}  (True = ascending).
+    """
+    numeric_cols = set(numeric_cols or []) | set(currency_cols or [])
+    _sort_state = {c: True for c in columns}
+
+    def _sort(col):
+        reverse = not _sort_state[col]
+        _sort_state[col] = not _sort_state[col]
+
+        items = [(tree.set(iid, col), iid) for iid in tree.get_children("")]
+
+        def _key(pair):
+            val = pair[0]
+            if col in numeric_cols:
+                try:
+                    return float("".join(c for c in val if c.isdigit() or c in ".-"))
+                except ValueError:
+                    return 0.0
+            return val.lower()
+
+        items.sort(key=_key, reverse=reverse)
+        for idx, (_, iid) in enumerate(items):
+            tree.move(iid, "", idx)
+            tags = list(tree.item(iid, "tags"))
+            # restripe
+            tags = [t for t in tags if t not in ("even", "odd")]
+            tags.insert(0, "even" if idx % 2 == 0 else "odd")
+            tree.item(iid, tags=tags)
+
+        # update heading icons: active col gets ▲/▼, others reset to ⇅
+        for c in columns:
+            if c == col:
+                icon = " ▲" if not reverse else " ▼"
+            else:
+                icon = " ⇅"
+            tree.heading(c, text=c + icon)
+
+    # initialise all sortable headings with the ⇅ hint icon
+    for col in columns:
+        tree.heading(col, text=col + " ⇅", command=lambda c=col: _sort(c))
+
+    return _sort_state
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Reusable Summary Card
 # ─────────────────────────────────────────────────────────────────────────────
 class _SummaryCard(ctk.CTkFrame):
@@ -123,6 +179,7 @@ class _WorkerFilesPanel(ctk.CTkFrame):
         self._revealed = {}
         self._all_revealed = False
         self._search_var = ctk.StringVar()
+        self._role_filter = ctk.StringVar(value="All")
         self._all_rows = []
         self._full_ssns = {}
 
@@ -156,17 +213,21 @@ class _WorkerFilesPanel(ctk.CTkFrame):
             font=("Segoe UI", 11),
         ).pack(side="left", padx=(0, 5))
         self._search_var.trace_add("write", lambda *_: self._filter())
-        ctk.CTkButton(
+        self._role_dropdown = ctk.CTkOptionMenu(
             sf,
-            text="Filter",
-            width=54,
+            variable=self._role_filter,
+            values=["All", "Manager", "Regular", "Sales Representative"],
+            width=110,
             height=30,
             fg_color="#e8eef5",
-            hover_color="#d7e3f0",
+            button_color="#d0d7de",
+            button_hover_color="#bcc8d4",
             text_color="#2c3e50",
             font=("Segoe UI", 11),
-            command=self._filter,
-        ).pack(side="left")
+            dropdown_font=("Segoe UI", 11),
+            command=lambda _: self._filter(),
+        )
+        self._role_dropdown.pack(side="left", padx=(0, 5))
         ctk.CTkButton(
             sf,
             text="Refresh",
@@ -220,12 +281,13 @@ class _WorkerFilesPanel(ctk.CTkFrame):
             foreground=[("selected", "#1a252f")],
         )
 
-        cols = ("Employee Name", "Position", "Hourly Wage", "SSN", "👁")
+        cols = ("Emp #", "Employee Name", "Position", "Hourly Wage", "SSN", "👁")
         self.tree = ttk.Treeview(
             card, columns=cols, show="headings", height=9, style="Worker.Treeview"
         )
 
         for col, w, anc, stretch in [
+            ("Emp #", 60, "center", False),
             ("Employee Name", 150, "w", True),
             ("Position", 90, "w", True),
             ("Hourly Wage", 110, "center", True),
@@ -234,6 +296,13 @@ class _WorkerFilesPanel(ctk.CTkFrame):
         ]:
             self.tree.heading(col, text=col)
             self.tree.column(col, width=w, anchor=anc, stretch=stretch, minwidth=w)  # type: ignore[arg-type]
+
+        _make_sortable(
+            self.tree,
+            ("Emp #", "Employee Name", "Position", "Hourly Wage"),
+            numeric_cols={"Emp #"},
+            currency_cols={"Hourly Wage"},
+        )
 
         self.tree.tag_configure("even", background="#ffffff", foreground="#2c3e50")
         self.tree.tag_configure("odd", background="#f7f9fb", foreground="#2c3e50")
@@ -279,10 +348,16 @@ class _WorkerFilesPanel(ctk.CTkFrame):
             rows = self._employee_service.get_all() if self._employee_service else []
             rows = [row for row in rows if row.get("is_active")]
 
+            _POS_DISPLAY = {
+                "Manager": "Manager",
+                "Hourly": "Regular",
+                "Sales Rep": "Sales Representative",
+            }
             self._all_rows = [
                 (
+                    r["employee_number"],
                     r["employee_name"],
-                    r["position"],
+                    _POS_DISPLAY.get(r["position"], r["position"]),
                     (
                         f"P{float(r['hourly_wage']):,.2f}"
                         if r.get("hourly_wage") is not None
@@ -293,7 +368,7 @@ class _WorkerFilesPanel(ctk.CTkFrame):
                 )
                 for r in rows
             ]
-            self._full_ssns = {i: r["ssn"] for i, r in enumerate(rows)}
+            self._full_ssns = {r["employee_number"]: r["ssn"] for r in rows}
 
         except Exception as e:
             messagebox.showerror("DB Error", f"Could not load employees:\n{e}")
@@ -315,7 +390,13 @@ class _WorkerFilesPanel(ctk.CTkFrame):
 
     def _filter(self):
         q = self._search_var.get().lower()
-        data = [r for r in self._all_rows if any(q in str(v).lower() for v in r[:4])]
+        role = self._role_filter.get()
+        data = [
+            r
+            for r in self._all_rows
+            if (role == "All" or str(r[2]).lower() == role.lower())
+            and (not q or any(q in str(v).lower() for v in r[:5]))
+        ]
         self._all_revealed = False
         self._toggle_all_btn.configure(text="👁  Show All SSNs")
         self._render(data)
@@ -324,34 +405,34 @@ class _WorkerFilesPanel(ctk.CTkFrame):
         region = self.tree.identify_region(event.x, event.y)
         col = self.tree.identify_column(event.x)
         iid = self.tree.identify_row(event.y)
-        if region != "cell" or col != "#5" or not iid:
+        if region != "cell" or col != "#6" or not iid:
             return
         self._toggle_row_ssn(iid)
 
     def _toggle_row_ssn(self, iid):
         vals = list(self.tree.item(iid, "values"))
-        children = list(self.tree.get_children())
-        idx = children.index(iid)
+        emp_num = int(vals[0])
         if self._revealed.get(iid, False):
-            last4 = str(vals[3])[-4:]
-            vals[3] = f"***-**-{last4}"
+            last4 = str(vals[4])[-4:]
+            vals[4] = f"***-**-{last4}"
             self._revealed[iid] = False
         else:
-            vals[3] = self._full_ssns.get(idx, vals[3])
+            vals[4] = self._full_ssns.get(emp_num, vals[4])
             self._revealed[iid] = True
         self.tree.item(iid, values=vals)
 
     def _toggle_all_ssn(self):
         self._all_revealed = not self._all_revealed
         children = list(self.tree.get_children())
-        for idx, iid in enumerate(children):
+        for iid in children:
             vals = list(self.tree.item(iid, "values"))
+            emp_num = int(vals[0])
             if self._all_revealed:
-                vals[3] = self._full_ssns.get(idx, vals[3])
+                vals[4] = self._full_ssns.get(emp_num, vals[4])
                 self._revealed[iid] = True
             else:
-                last4 = str(vals[3])[-4:]
-                vals[3] = f"***-**-{last4}"
+                last4 = str(vals[4])[-4:]
+                vals[4] = f"***-**-{last4}"
                 self._revealed[iid] = False
             self.tree.item(iid, values=vals)
         self._toggle_all_btn.configure(
@@ -377,10 +458,9 @@ class _AuditPanel(ctk.CTkFrame):
         self.grid_rowconfigure(1, weight=1)
 
         today = date.today()
-        self._week = today - timedelta(days=today.weekday())
-        # self._week = date(2006, 8, 7)
-        sun = self._week + timedelta(days=6)
-        week_str = f"Week: {self._week.strftime('%b %d')} - {sun.strftime('%b %d, %Y')}"
+        self._week = (
+            today - timedelta(days=today.weekday()) + timedelta(days=5)
+        )  # current Saturday
 
         # ── week banner ───────────────────────────────────────────────────────
         banner = ctk.CTkFrame(
@@ -399,9 +479,45 @@ class _AuditPanel(ctk.CTkFrame):
             font=("Segoe UI", 16, "bold"),
             text_color="#2c3e50",
         ).pack(side="left")
+
+        # ── date-picker (right side of banner) ───────────────────────────────
+        picker_frame = ctk.CTkFrame(brow, fg_color="transparent")
+        picker_frame.pack(side="right")
+
         ctk.CTkLabel(
-            brow, text=week_str, font=("Segoe UI", 11), text_color="#7f8c8d"
-        ).pack(side="right")
+            picker_frame, text="Week of:", font=("Segoe UI", 11), text_color="#7f8c8d"
+        ).pack(side="left", padx=(0, 6))
+
+        self._picker_field = DatePickerField(
+            picker_frame,
+            default_date=self._week,
+            width=110,
+            on_change=lambda _date: self._on_week_change(),
+        )
+        self._picker_field.pack(side="left", padx=(0, 6))
+        self._picker_var = self._picker_field.variable
+
+        ctk.CTkButton(
+            picker_frame,
+            text="Go",
+            width=42,
+            height=28,
+            fg_color="#3498db",
+            hover_color="#2980b9",
+            text_color="#ffffff",
+            font=("Segoe UI", 11, "bold"),
+            corner_radius=6,
+            command=self._on_week_change,
+        ).pack(side="left", padx=(0, 10))
+
+        sun = self._week + timedelta(days=6)
+        self._week_lbl = ctk.CTkLabel(
+            picker_frame,
+            text=f"({self._week.strftime('%b %d')} – {sun.strftime('%b %d, %Y')})",
+            font=("Segoe UI", 10),
+            text_color="#7f8c8d",
+        )
+        self._week_lbl.pack(side="left")
 
         # ── two-column body ───────────────────────────────────────────────────
         body = ctk.CTkFrame(self, fg_color="transparent")
@@ -422,19 +538,73 @@ class _AuditPanel(ctk.CTkFrame):
         self._left_card.grid_columnconfigure(0, weight=1)
         self._left_card.grid_rowconfigure(1, weight=1)
 
+        miss_hdr_row = ctk.CTkFrame(self._left_card, fg_color="transparent")
+        miss_hdr_row.grid(row=0, column=0, sticky="ew", padx=16, pady=(14, 4))
+        miss_hdr_row.grid_columnconfigure(0, weight=1)
+
         self._missing_title = ctk.CTkLabel(
-            self._left_card,
+            miss_hdr_row,
             text="Missing Timecards: loading...",
             font=("Segoe UI", 13, "bold"),
             text_color="#e74c3c",
         )
-        self._missing_title.grid(row=0, column=0, sticky="w", padx=16, pady=(14, 8))
+        self._missing_title.grid(row=0, column=0, sticky="w")
 
-        self._missing_body = ctk.CTkScrollableFrame(
-            self._left_card, fg_color="transparent", corner_radius=0, height=260
+        style_miss = ttk.Style()
+        style_miss.configure(
+            "Miss.Treeview",
+            font=("Segoe UI", 11),
+            rowheight=30,
+            background="#ffffff",
+            fieldbackground="#ffffff",
+            borderwidth=0,
         )
-        self._missing_body.grid(row=1, column=0, sticky="nsew", padx=8, pady=(0, 8))
-        self._missing_body.grid_columnconfigure(0, weight=1)
+        style_miss.configure(
+            "Miss.Treeview.Heading",
+            font=("Segoe UI", 11, "bold"),
+            background="#2c3e50",
+            foreground="#ffffff",
+            relief="flat",
+        )
+        style_miss.map(
+            "Miss.Treeview.Heading",
+            background=[("active", "#34495e")],
+        )
+
+        miss_cols = ("Emp #", "Employee Name", "Position")
+        self._missing_tree = ttk.Treeview(
+            self._left_card,
+            columns=miss_cols,
+            show="headings",
+            height=8,
+            style="Miss.Treeview",
+        )
+        for col, w, anc in [
+            ("Emp #", 70, "center"),
+            ("Employee Name", 160, "w"),
+            ("Position", 110, "w"),
+        ]:
+            self._missing_tree.heading(col, text=col)
+            self._missing_tree.column(col, width=w, anchor=anc, stretch=True)  # type: ignore[arg-type]
+
+        self._missing_tree.tag_configure(
+            "even", background="#fff8f8", foreground="#2c3e50"
+        )
+        self._missing_tree.tag_configure(
+            "odd", background="#fdecea", foreground="#2c3e50"
+        )
+
+        _make_sortable(self._missing_tree, miss_cols, numeric_cols={"Emp #"})
+
+        miss_vsb = ttk.Scrollbar(
+            self._left_card, orient="vertical", command=self._missing_tree.yview
+        )
+        self._missing_tree.configure(yscrollcommand=miss_vsb.set)
+        miss_vsb.grid(row=1, column=1, sticky="ns", padx=(0, 6), pady=(0, 8))
+        self._missing_tree.grid(
+            row=1, column=0, sticky="nsew", padx=(8, 0), pady=(0, 8)
+        )
+        self._left_card.grid_rowconfigure(1, weight=1)
 
         # ── RIGHT — totals + buttons (sticky) ────────────────────────────────
         right_card = ctk.CTkFrame(
@@ -524,12 +694,31 @@ class _AuditPanel(ctk.CTkFrame):
         comm_card.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(2, weight=0)
 
-        ctk.CTkLabel(
+        self._comm_week_lbl = ctk.CTkLabel(
             comm_card,
-            text="Sales Rep Commissions — This Week",
+            text=f"Sales Representative Commissions (Week of {self._week.strftime('%b %d, %Y')})",
             font=("Segoe UI", 13, "bold"),
             text_color="#2c3e50",
-        ).pack(anchor="w", padx=16, pady=(14, 6))
+        )
+        self._comm_week_lbl.grid(row=0, column=0, sticky="w", padx=16, pady=(14, 6))
+
+        # Status filter for commission table
+        self._comm_status_var = ctk.StringVar(value="All")
+        comm_filter = ctk.CTkOptionMenu(
+            comm_card,
+            variable=self._comm_status_var,
+            values=["All", "Paid", "Pending"],
+            width=100,
+            height=26,
+            fg_color="#e8eef5",
+            button_color="#d0d7de",
+            button_hover_color="#bcc8d4",
+            text_color="#2c3e50",
+            font=("Segoe UI", 11),
+            dropdown_font=("Segoe UI", 11),
+            command=lambda _: self._apply_comm_filter(),
+        )
+        comm_filter.grid(row=0, column=1, sticky="e", padx=16, pady=(14, 6))
 
         style2 = ttk.Style()
         style2.configure(
@@ -549,7 +738,8 @@ class _AuditPanel(ctk.CTkFrame):
         )
 
         comm_cols = (
-            "Sales Rep",
+            "Emp #",
+            "Sales Representative",
             "Invoices",
             "Total Sales",
             "Commission (5%)",
@@ -559,18 +749,33 @@ class _AuditPanel(ctk.CTkFrame):
             comm_card,
             columns=comm_cols,
             show="headings",
-            height=5,
+            height=10,
             style="Comm.Treeview",
         )
         for col, w, anc, stretch in [
-            ("Sales Rep", 110, "w", True),
+            ("Emp #", 60, "center", False),
+            ("Sales Representative", 110, "w", True),
             ("Invoices", 80, "center", True),
-            ("Total Sales", 130, "w", True),
-            ("Commission (5%)", 130, "w", True),
+            ("Total Sales", 130, "center", True),
+            ("Commission (5%)", 130, "center", True),
             ("Status", 100, "center", True),
         ]:
             self._comm_tree.heading(col, text=col)
             self._comm_tree.column(col, width=w, anchor=anc, stretch=stretch)  # type: ignore[arg-type]
+
+        _make_sortable(
+            self._comm_tree,
+            (
+                "Emp #",
+                "Sales Representative",
+                "Invoices",
+                "Total Sales",
+                "Commission (5%)",
+            ),
+            numeric_cols={"Emp #", "Invoices"},
+            currency_cols={"Total Sales", "Commission (5%)"},
+        )
+        self._comm_all_rows: list = []  # cache for status filter
 
         self._comm_tree.tag_configure(
             "even", background="#ffffff", foreground="#2c3e50"
@@ -579,13 +784,132 @@ class _AuditPanel(ctk.CTkFrame):
         self._comm_tree.tag_configure("paid", foreground="#1e8449")
         self._comm_tree.tag_configure("pending", foreground="#d35400")
 
+        comm_card.grid_columnconfigure(0, weight=1)
+        comm_card.grid_rowconfigure(1, weight=1)
+
         cvsb = ttk.Scrollbar(
             comm_card, orient="vertical", command=self._comm_tree.yview
         )
         self._comm_tree.configure(yscrollcommand=cvsb.set)
-        cvsb.pack(side="right", fill="y", pady=(0, 8))
-        self._comm_tree.pack(fill="x", padx=(8, 0), pady=(0, 8))
+        cvsb.grid(row=1, column=1, sticky="ns", padx=(0, 6), pady=(0, 8))
+        self._comm_tree.grid(row=1, column=0, sticky="nsew", padx=(8, 0), pady=(0, 8))
 
+        # ── QD-Sec2 — Weekly Payroll Check File ──────────────────────────────
+        pay_card = ctk.CTkFrame(
+            self,
+            fg_color="#ffffff",
+            corner_radius=12,
+            border_width=1,
+            border_color="#e0e0e0",
+        )
+        pay_card.grid(row=3, column=0, sticky="ew", pady=(12, 0))
+        pay_card.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(3, weight=0)
+
+        self._pay_week_lbl = ctk.CTkLabel(
+            pay_card,
+            text=f"Weekly Payroll Check File  (Week of {self._week.strftime('%b %d, %Y')})",  # qdsec2
+            font=("Segoe UI", 13, "bold"),
+            text_color="#2c3e50",
+        )
+        pay_card.grid_rowconfigure(1, weight=1)
+        self._pay_week_lbl.grid(
+            row=0, column=0, columnspan=2, sticky="w", padx=16, pady=(14, 6)
+        )
+
+        style3 = ttk.Style()
+        style3.configure(
+            "Pay.Treeview",
+            font=("Segoe UI", 11),
+            rowheight=30,
+            background="#ffffff",
+            fieldbackground="#ffffff",
+            borderwidth=0,
+        )
+        style3.configure(
+            "Pay.Treeview.Heading",
+            font=("Segoe UI", 11, "bold"),
+            background="#2c3e50",
+            foreground="#ffffff",
+            relief="flat",
+        )
+        style3.map(
+            "Pay.Treeview.Heading",
+            background=[("active", "#2c3e50")],
+        )
+
+        pay_cols = (
+            "Emp #",
+            "Employee Name",
+            "Week Date",
+            "Hours Worked",
+            "Hourly Wage",
+            "Gross Pay",
+        )
+        self._pay_tree = ttk.Treeview(
+            pay_card,
+            columns=pay_cols,
+            show="headings",
+            height=10,
+            style="Pay.Treeview",
+        )
+        for col, w, anc, stretch in [
+            ("Emp #", 60, "center", False),
+            ("Employee Name", 160, "w", True),
+            ("Week Date", 110, "center", True),
+            ("Hours Worked", 110, "center", True),
+            ("Hourly Wage", 110, "center", True),
+            ("Gross Pay", 120, "center", True),
+        ]:
+            self._pay_tree.heading(col, text=col)
+            self._pay_tree.column(col, width=w, anchor=anc, stretch=stretch)  # type: ignore[arg-type]
+
+        _make_sortable(
+            self._pay_tree,
+            pay_cols,
+            numeric_cols={"Emp #", "Hours Worked"},
+            currency_cols={"Hourly Wage", "Gross Pay"},
+        )
+
+        self._pay_tree.tag_configure("even", background="#ffffff", foreground="#2c3e50")
+        self._pay_tree.tag_configure("odd", background="#f7f9fb", foreground="#2c3e50")
+
+        pvsb = ttk.Scrollbar(pay_card, orient="vertical", command=self._pay_tree.yview)
+        self._pay_tree.configure(yscrollcommand=pvsb.set)
+        pvsb.grid(row=1, column=1, sticky="ns", padx=(0, 6), pady=(0, 8))
+        self._pay_tree.grid(row=1, column=0, sticky="nsew", padx=(8, 0), pady=(0, 8))
+
+        self._load_db()
+
+    def _on_week_change(self):
+        """Parse the date-picker entry, snap to Monday, reload the panel."""
+        raw = self._picker_field.get_value().strip()
+        try:
+            picked = datetime.strptime(raw, "%Y-%m-%d").date()
+        except ValueError:
+            messagebox.showerror(
+                "Invalid Date",
+                f"'{raw}' is not a valid date.\nPlease enter YYYY-MM-DD (e.g. 2006-08-07).",
+            )
+            return
+        # Block future dates
+        if picked > date.today():
+            messagebox.showwarning(
+                "Future Date",
+                "You cannot select a future date.\nPlease pick today or an earlier date.",
+            )
+            self._picker_field.set_date(self._week)
+            return
+        # Snap to Monday of the chosen week
+        monday = picked - timedelta(days=picked.weekday())
+        self._week = monday
+        # Update the picker entry to the snapped Monday
+        self._picker_field.set_date(monday)
+        # Update the range label
+        sun = monday + timedelta(days=6)
+        self._week_lbl.configure(
+            text=f"({monday.strftime('%b %d')} – {sun.strftime('%b %d, %Y')})"
+        )
         self._load_db()
 
     def _ensure_active_session(self, allowed_roles=None):
@@ -613,42 +937,27 @@ class _AuditPanel(ctk.CTkFrame):
 
         except Exception as e:
             messagebox.showerror("DB Error", f"Audit load failed:\n{e}")
-            missing, gross = [], 0
+            missing, gross, week_timecards = [], 0, []
 
-        for w in self._missing_body.winfo_children():
-            w.destroy()
+        for iid in self._missing_tree.get_children():
+            self._missing_tree.delete(iid)
 
         self._missing_title.configure(
             text=f"Missing Timecards: {len(missing)} Hourly Employees"
         )
 
-        for row in missing:
-            f = ctk.CTkFrame(self._missing_body, fg_color="#fff8f8", corner_radius=8)
-            f.pack(fill="x", pady=3)
-            ctk.CTkLabel(
-                f, text="!", font=("Segoe UI", 14, "bold"), text_color="#e74c3c"
-            ).pack(side="left", padx=(10, 6))
-            info = ctk.CTkFrame(f, fg_color="transparent")
-            info.pack(side="left", fill="x", expand=True, pady=8)
-            ctk.CTkLabel(
-                info,
-                text=row["employee_name"],
-                font=("Segoe UI", 12, "bold"),
-                text_color="#2c3e50",
-            ).pack(anchor="w")
-            ctk.CTkLabel(
-                info, text=row["position"], font=("Segoe UI", 10), text_color="#7f8c8d"
-            ).pack(anchor="w")
-            ctk.CTkLabel(
-                f,
-                text="Missing",
-                font=("Segoe UI", 9, "bold"),
-                text_color="#ffffff",
-                fg_color="#e74c3c",
-                corner_radius=4,
-                width=60,
-                height=20,
-            ).pack(side="right", padx=10)
+        for idx, row in enumerate(missing):
+            tag = "even" if idx % 2 == 0 else "odd"
+            self._missing_tree.insert(
+                "",
+                "end",
+                values=(
+                    row["employee_number"],
+                    row["employee_name"],
+                    row.get("position", "Hourly"),
+                ),
+                tags=(tag,),
+            )
 
         self._total_lbl.configure(text=f"P{gross:,.2f}")
         if missing:
@@ -658,12 +967,51 @@ class _AuditPanel(ctk.CTkFrame):
         else:
             self._warn_lbl.configure(text="All timecards submitted!")
 
+        self._load_pay_checks(week_timecards)
         self._load_commissions()
+
+    def _load_pay_checks(self, week_timecards):
+        """Populate QD-Sec2 payroll check file table from already-fetched timecards."""
+        for iid in self._pay_tree.get_children():
+            self._pay_tree.delete(iid)
+        self._pay_week_lbl.configure(
+            text=f"Weekly Payroll Check File  (Week of {self._week.strftime('%b %d, %Y')})"
+        )
+
+        sorted_rows = sorted(week_timecards, key=lambda r: r.get("employee_name", ""))
+        for idx, row in enumerate(sorted_rows):
+            tag = "even" if idx % 2 == 0 else "odd"
+            hours = float(row.get("hours_worked") or 0)
+            wage = float(row.get("hourly_wage") or 0)
+            gross = round(hours * wage, 2)
+            week_date = row.get("week_date")
+            week_str = (
+                week_date.strftime("%b %d, %Y")
+                if hasattr(week_date, "strftime")
+                else str(week_date)
+            )
+            self._pay_tree.insert(
+                "",
+                "end",
+                values=(
+                    row.get("employee_number", ""),
+                    row.get("employee_name", ""),
+                    week_str,
+                    f"{hours:.2f}",
+                    f"P{wage:,.2f}",
+                    f"P{gross:,.2f}",
+                ),
+                tags=(tag,),
+            )
 
     def _load_commissions(self):
         """Load this week's sales rep commission data."""
         for iid in self._comm_tree.get_children():
             self._comm_tree.delete(iid)
+
+        self._comm_week_lbl.configure(
+            text=f"Sales Representative Commissions (Week of {self._week.strftime('%b %d, %Y')})"
+        )
 
         try:
             conn = _get_conn(self.db_config)
@@ -702,21 +1050,33 @@ class _AuditPanel(ctk.CTkFrame):
             messagebox.showerror("DB Error", f"Commission load failed:\n{e}")
             return
 
-        for idx, r in enumerate(rows):
-            tag = "even" if idx % 2 == 0 else "odd"
-            stag = "paid" if r["status"] == "Paid" else "pending"
-            self._comm_tree.insert(
-                "",
-                "end",
-                values=(
-                    r["employee_name"],
-                    r["invoice_count"],
-                    f"P{float(r['total_sales']):,.2f}",
-                    f"P{float(r['commission']):,.2f}",
-                    r["status"],
-                ),
-                tags=(tag, stag),
+        self._comm_all_rows = [
+            (
+                r["employee_number"],
+                r["employee_name"],
+                r["invoice_count"],
+                f"P{float(r['total_sales']):,.2f}",
+                f"P{float(r['commission']):,.2f}",
+                r["status"],
             )
+            for r in rows
+        ]
+        self._apply_comm_filter()
+
+    def _apply_comm_filter(self):
+        """Re-render commission table filtered by status dropdown."""
+        status_filter = self._comm_status_var.get()
+        for iid in self._comm_tree.get_children():
+            self._comm_tree.delete(iid)
+        filtered = [
+            row
+            for row in self._comm_all_rows
+            if status_filter == "All" or row[5] == status_filter
+        ]
+        for idx, vals in enumerate(filtered):
+            tag = "even" if idx % 2 == 0 else "odd"
+            stag = "paid" if vals[5] == "Paid" else "pending"
+            self._comm_tree.insert("", "end", values=vals, tags=(tag, stag))
 
     def _generate_payroll(self):
         """Insert employee_payments for hourly timecards AND sales rep commissions."""
@@ -730,6 +1090,15 @@ class _AuditPanel(ctk.CTkFrame):
 
             def _check_no():
                 return "CHK-" + "".join(random.choices(string.digits, k=6))
+
+            # ── sync the payment_id sequence to avoid pkey conflicts ──────────
+            cur.execute("""
+                SELECT setval(
+                    pg_get_serial_sequence('employee_payments', 'payment_id'),
+                    COALESCE((SELECT MAX(payment_id) FROM employee_payments), 0) + 1,
+                    false
+                )
+            """)
 
             inserted = 0
             week_end = self._week + timedelta(days=6)
@@ -1521,6 +1890,202 @@ class _SalesRepPanel(ctk.CTkFrame):
 # ─────────────────────────────────────────────────────────────────────────────
 # PANEL 5 — Payroll History  (Manager only, 4th tab)
 # ─────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# PANEL 3b — Timecard Overview  (Manager read-only view)
+# ─────────────────────────────────────────────────────────────────────────────
+class _ManagerTimecardOverviewPanel(ctk.CTkFrame):
+    """Read-only timecard overview for managers. No submission — managers
+    review timecards via Payroll Audit & Processing instead."""
+
+    def __init__(self, parent, db_config):
+        super().__init__(parent, fg_color="transparent")
+        self.db_config = db_config
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(1, weight=1)
+
+        today = date.today()
+        self._week = today - timedelta(days=today.weekday())
+
+        # ── timecard table card ───────────────────────────────────────────────
+        card = ctk.CTkFrame(
+            self,
+            fg_color="#ffffff",
+            corner_radius=12,
+            border_width=1,
+            border_color="#e0e0e0",
+        )
+        card.grid(row=1, column=0, sticky="nsew")
+        card.grid_columnconfigure(0, weight=1)
+        card.grid_rowconfigure(1, weight=1)
+
+        hdr = ctk.CTkFrame(card, fg_color="transparent")
+        hdr.grid(row=0, column=0, columnspan=2, sticky="ew", padx=16, pady=(14, 6))
+        hdr.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(
+            hdr,
+            text="Current Week Timecards",
+            font=("Segoe UI", 14, "bold"),
+            text_color="#2c3e50",
+        ).grid(row=0, column=0, sticky="w")
+
+        btn_frame = ctk.CTkFrame(hdr, fg_color="transparent")
+        btn_frame.grid(row=0, column=1, sticky="e")
+
+        self._tc_status_var = ctk.StringVar(value="All")
+        ctk.CTkOptionMenu(
+            btn_frame,
+            variable=self._tc_status_var,
+            values=["All", "Paid", "Pending"],
+            width=100,
+            height=26,
+            fg_color="#e8eef5",
+            button_color="#d0d7de",
+            button_hover_color="#bcc8d4",
+            text_color="#2c3e50",
+            font=("Segoe UI", 11),
+            dropdown_font=("Segoe UI", 11),
+            command=lambda _: self._apply_tc_filter(),
+        ).pack(side="left", padx=(0, 6))
+
+        ctk.CTkButton(
+            btn_frame,
+            text="Refresh",
+            width=68,
+            height=28,
+            fg_color="#ebf3fb",
+            hover_color="#dbe9f9",
+            text_color="#1f5f9f",
+            font=("Segoe UI", 11),
+            command=self._load,
+        ).pack(side="left")
+
+        style = ttk.Style()
+        style.configure(
+            "MTC.Treeview",
+            font=("Segoe UI", 11),
+            rowheight=30,
+            background="#ffffff",
+            fieldbackground="#ffffff",
+            borderwidth=0,
+        )
+        style.configure(
+            "MTC.Treeview.Heading",
+            font=("Segoe UI", 11, "bold"),
+            background="#2c3e50",
+            foreground="#ffffff",
+            relief="flat",
+        )
+        style.map(
+            "MTC.Treeview",
+            background=[("selected", "#d6eaf8")],
+            foreground=[("selected", "#1a252f")],
+        )
+
+        cols = (
+            "Emp #",
+            "Employee Name",
+            "Week Starting",
+            "Hours Worked",
+            "Gross Pay",
+            "Status",
+        )
+        self._tree = ttk.Treeview(
+            card, columns=cols, show="headings", height=10, style="MTC.Treeview"
+        )
+        for col, w, anc in [
+            ("Emp #", 60, "center"),
+            ("Employee Name", 160, "w"),
+            ("Week Starting", 130, "center"),
+            ("Hours Worked", 110, "center"),
+            ("Gross Pay", 120, "center"),
+            ("Status", 100, "center"),
+        ]:
+            self._tree.heading(col, text=col)
+            self._tree.column(col, width=w, anchor=anc)  # type: ignore[arg-type]
+
+        _make_sortable(
+            self._tree,
+            ("Emp #", "Employee Name", "Week Starting", "Hours Worked", "Gross Pay"),
+            numeric_cols={"Emp #", "Hours Worked"},
+            currency_cols={"Gross Pay"},
+        )
+        self._tc_all_rows: list = []  # cache for status filter
+
+        self._tree.tag_configure("even", background="#ffffff", foreground="#2c3e50")
+        self._tree.tag_configure("odd", background="#f7f9fb", foreground="#2c3e50")
+        self._tree.tag_configure("paid", foreground="#1e8449")
+        self._tree.tag_configure("pending", foreground="#d35400")
+
+        vsb = ttk.Scrollbar(card, orient="vertical", command=self._tree.yview)
+        self._tree.configure(yscrollcommand=vsb.set)
+        vsb.grid(row=1, column=1, sticky="ns", padx=(0, 6), pady=(0, 10))
+        self._tree.grid(row=1, column=0, sticky="nsew", padx=(10, 0), pady=(0, 10))
+
+        self._load()
+
+    def _load(self):
+        for iid in self._tree.get_children():
+            self._tree.delete(iid)
+
+        if psycopg2 is None:
+            return
+
+        try:
+            conn = _get_conn(self.db_config)
+            cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)  # type: ignore[attr-defined]
+            cur.execute(
+                """
+                SELECT t.employee_number,
+                       e.employee_name,
+                       t.week_date,
+                       t.hours_worked,
+                       ROUND((t.hours_worked * COALESCE(e.hourly_wage, 0))::numeric, 2) AS gross,
+                       CASE WHEN ep.payment_id IS NOT NULL THEN 'Paid' ELSE 'Pending' END AS status
+                FROM   timecards t
+                JOIN   employees e ON e.employee_number = t.employee_number
+                LEFT JOIN employee_payments ep ON ep.timecard_id = t.timecard_id
+                WHERE  e.position = 'Hourly'
+                ORDER  BY t.week_date DESC, e.employee_name
+                LIMIT  50
+                """,
+            )
+            rows = cur.fetchall()
+            cur.close()
+            conn.close()
+        except Exception as e:
+            messagebox.showerror("DB Error", f"Could not load timecards:\n{e}")
+            return
+
+        self._tc_all_rows = [
+            (
+                r["employee_number"],
+                r["employee_name"],
+                r["week_date"].strftime("%b %d, %Y"),
+                f"{float(r['hours_worked']):.2f} hrs",
+                f"P{float(r['gross']):,.2f}",
+                r["status"],
+            )
+            for r in rows
+        ]
+        self._apply_tc_filter()
+
+    def _apply_tc_filter(self):
+        """Re-render timecard table filtered by status dropdown."""
+        status_filter = self._tc_status_var.get()
+        for iid in self._tree.get_children():
+            self._tree.delete(iid)
+        filtered = [
+            row
+            for row in self._tc_all_rows
+            if status_filter == "All" or row[5] == status_filter
+        ]
+        for idx, vals in enumerate(filtered):
+            tag = "even" if idx % 2 == 0 else "odd"
+            stag = "paid" if vals[5] == "Paid" else "pending"
+            self._tree.insert("", "end", values=vals, tags=(tag, stag))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 class _PayrollHistoryPanel(ctk.CTkFrame):
     """Shows all past employee_payments records — hourly and commission."""
 
@@ -1627,19 +2192,24 @@ class _PayrollHistoryPanel(ctk.CTkFrame):
             foreground=[("selected", "#1a252f")],
         )
 
-        cols = ("Date Paid", "Employee", "Type", "Check #", "Amount")
+        cols = ("Date Paid", "Emp #", "Employee", "Type", "Check #", "Amount")
         self._tree = ttk.Treeview(
-            card, columns=cols, show="headings", height=12, style="PH.Treeview"
+            card, columns=cols, show="headings", height=7, style="PH.Treeview"
         )
         for col, w, anc, stretch in [
-            ("Date Paid", 150, "center", False),
+            ("Date Paid", 130, "center", False),
+            ("Emp #", 60, "center", False),
             ("Employee", 110, "w", True),
-            ("Type", 100, "w", True),
+            ("Type", 90, "w", True),
             ("Check #", 100, "w", True),
             ("Amount", 120, "w", True),
         ]:
             self._tree.heading(col, text=col)
             self._tree.column(col, width=w, anchor=anc, stretch=stretch)  # type: ignore[arg-type]
+
+        _make_sortable(
+            self._tree, cols, numeric_cols={"Emp #"}, currency_cols={"Amount"}
+        )
 
         self._tree.tag_configure("even", background="#ffffff", foreground="#2c3e50")
         self._tree.tag_configure("odd", background="#f7f9fb", foreground="#2c3e50")
@@ -1662,6 +2232,7 @@ class _PayrollHistoryPanel(ctk.CTkFrame):
             cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)  # type: ignore[attr-defined]
             cur.execute("""
                 SELECT ep.date_paid,
+                       ep.employee_number,
                        e.employee_name,
                        ep.payment_type,
                        ep.check_number,
@@ -1702,7 +2273,7 @@ class _PayrollHistoryPanel(ctk.CTkFrame):
 
         if not rows:
             self._tree.insert(
-                "", "end", values=("—", "No payroll records yet", "—", "—", "—")
+                "", "end", values=("—", "—", "No payroll records yet", "—", "—", "—")
             )
             return
 
@@ -1714,6 +2285,7 @@ class _PayrollHistoryPanel(ctk.CTkFrame):
                 "end",
                 values=(
                     r["date_paid"].strftime("%b %d, %Y"),
+                    r["employee_number"],
                     r["employee_name"],
                     r["payment_type"].capitalize(),
                     r["check_number"],
@@ -1735,14 +2307,22 @@ class PayrollView(ctk.CTkFrame):
     """
 
     def __init__(
-        self, parent, controller, role="Manager", db_config=None, employee_number=None
+        self,
+        parent,
+        controller,
+        role="Manager",
+        db_config=None,
+        employee_number=None,
+        session_manager=None,
     ):
         super().__init__(parent, fg_color="#f8f9fa")
         self.controller = controller
         self.role = role
         self.db_config = db_config or {}
         self.employee_number = employee_number
-        self._session_manager = getattr(controller, "session_manager", None)
+        self._session_manager = session_manager or getattr(
+            controller, "session_manager", None
+        )
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(3, weight=1)
@@ -1863,8 +2443,8 @@ class PayrollView(ctk.CTkFrame):
             "audit": lambda: _AuditPanel(
                 self._scroll, self.db_config, self._session_manager
             ),
-            "timecard": lambda: _TimecardPanel(
-                self._scroll, self.db_config, None, self._session_manager
+            "timecard": lambda: _ManagerTimecardOverviewPanel(
+                self._scroll, self.db_config
             ),
             "history": lambda: _PayrollHistoryPanel(self._scroll, self.db_config),
         }[key]()
@@ -1876,7 +2456,9 @@ class PayrollView(ctk.CTkFrame):
             conn = _get_conn(self.db_config)
             cur = conn.cursor()
             today = date.today()
-            week = today - timedelta(days=today.weekday())
+            week = (
+                today - timedelta(days=today.weekday()) + timedelta(days=5)
+            )  # Saturday
 
             cur.execute("SELECT COUNT(*) FROM employees WHERE is_active=TRUE")
             result = cur.fetchone()

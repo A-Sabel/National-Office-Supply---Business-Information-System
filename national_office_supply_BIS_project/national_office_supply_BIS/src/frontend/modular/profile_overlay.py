@@ -32,9 +32,11 @@ class ProfileOverlay(ctk.CTkFrame):
         text_stack.pack(side="left")
         
         ctk.CTkLabel(text_stack, text=self.session.employee_name, font=("Segoe UI", 16, "bold"), 
-                     text_color="#2c3e50").pack(anchor="w")
-        ctk.CTkLabel(text_stack, text=self.session.role, font=("Segoe UI", 12), 
-                     text_color="#3498db").pack(anchor="w")
+                 text_color="#2c3e50").pack(anchor="w")
+        # Map internal Hourly role to a display label "Regular" (frontend-only)
+        role_display = "Regular" if getattr(self.session, "role", "") == "Hourly" else getattr(self.session, "role", "")
+        ctk.CTkLabel(text_stack, text=role_display, font=("Segoe UI", 12), 
+                 text_color="#3498db").pack(anchor="w")
 
         # --- 2. INFO SECTION ---
         self.info_container = ctk.CTkFrame(self, fg_color="#f8f9fa", corner_radius=10)

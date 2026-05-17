@@ -9,6 +9,8 @@ import customtkinter as ctk
 import psycopg2
 
 from backend.report_service import ReportService
+from frontend.modular.date_picker import DatePickerField
+from .csv_tab import export_customer_balances
 
 # ── Shared colour palette ─────────────────────────────────────────────────────
 BRAND_NAVY = "#001440"
@@ -289,18 +291,6 @@ class CustomerListReportView(ctk.CTkFrame):
 
         ctk.CTkButton(
             right,
-            text="🖨  Print",
-            width=100,
-            height=34,
-            corner_radius=6,
-            fg_color="#ecf0f1",
-            text_color=TEXT_DARK,
-            hover_color=BORDER,
-            font=FONT_BODY,
-        ).pack(side="left", padx=(0, 8))
-
-        ctk.CTkButton(
-            right,
             text="⬇  Export CSV",
             width=130,
             height=34,
@@ -310,13 +300,26 @@ class CustomerListReportView(ctk.CTkFrame):
             text_color=TEXT_WHITE,
             font=FONT_BTN,
             command=self._export_csv,
-        ).pack(side="left")
+        ).pack(side="right")
+
+        ctk.CTkButton(
+            right,
+            text="↺  Refresh",
+            width=110,
+            height=34,
+            corner_radius=6,
+            fg_color="transparent",
+            hover_color="#e8f4fd",
+            text_color=BRAND_BLUE,
+            border_width=1,
+            border_color=BRAND_BLUE,
+            font=FONT_BTN,
+            command=self._apply_filter,
+        ).pack(side="right", padx=(0, 10))
 
     def _handle_nav_toggle(self):
         if callable(self._on_toggle_navigation):
             self._on_toggle_navigation()
-        self._is_navigation_visible = not self._is_navigation_visible
-        self._nav_toggle_btn.configure(text="◀" if self._is_navigation_visible else "▶")
 
     def _row_value(self, row, key: str, index: int, default=None):
         if isinstance(row, dict):
@@ -446,7 +449,8 @@ class CustomerListReportView(ctk.CTkFrame):
             fg_color=ACCENT_AMBER,
             hover_color="#e67e22",
             command=self._apply_filter,
-        ).pack(side="left", padx=(4, 0))
+        ).pack(side="left", padx=(4, 20))
+
 
         self._count_label = ctk.CTkLabel(
             inner,
@@ -834,29 +838,8 @@ class CustomerListReportView(ctk.CTkFrame):
 
     # ── CSV export ────────────────────────────────────────────────────────────
     def _export_csv(self):
-        today = datetime.date.today().strftime("%Y-%m-%d")
-        path = fd.asksaveasfilename(
-            defaultextension=".csv",
-            filetypes=[("CSV files", "*.csv")],
-            initialfile=f"customer_list_{today}.csv",
-            title="Save Customer List",
-        )
-        if not path:
-            return
-        headers = (
-            "Cust. No.",
-            "Company",
-            "Address",
-            "Phone",
-            "Current Balance",
-            "Status",
-        )
-        try:
-            with open(path, "w", newline="", encoding="utf-8-sig") as f:
-                writer = csv.writer(f)
-                writer.writerow(headers)
-                for iid in self._customers_tree.get_children():
-                    writer.writerow(self._customers_tree.item(iid, "values"))
-            messagebox.showinfo("Export Complete", f"Customer list saved to:\n{path}")
-        except Exception as ex:
-            messagebox.showerror("Export Failed", str(ex))
+        rows = [
+            self._customers_tree.item(iid, "values")
+            for iid in self._customers_tree.get_children()
+        ]
+        export_customer_balances(self, rows)

@@ -78,10 +78,19 @@ class ReportsHubView(ctk.CTkFrame):
         },
     }
 
-    def __init__(self, parent, controller=None, db_config: DBConfig | None = None):
+    def __init__(
+        self,
+        parent,
+        controller=None,
+        db_config: DBConfig | None = None,
+        session_manager=None,
+    ):
         super().__init__(parent, fg_color="#f8f9fa")
         self.controller = controller
         self.db_config = db_config
+        self.session_manager = session_manager or getattr(
+            controller, "session_manager", None
+        )
         self._section_frames = {}
         self._active_key = None
         self._sidebar_visible = True
@@ -121,11 +130,9 @@ class ReportsHubView(ctk.CTkFrame):
             self.sidebar.grid(row=0, column=0, sticky="ns", padx=(12, 10), pady=12)
             self._sidebar_visible = True
 
-        weekly_view = self._section_frames.get("weekly_sales")
-        if weekly_view is not None and hasattr(
-            weekly_view, "set_navigation_visibility"
-        ):
-            weekly_view.set_navigation_visibility(self._sidebar_visible)
+        for view in self._section_frames.values():
+            if hasattr(view, "set_navigation_visibility"):
+                view.set_navigation_visibility(self._sidebar_visible)
 
     def show_section(self, section_key: str | None):
         """Show the requested report section, creating if needed.
@@ -241,6 +248,8 @@ class ReportsHubView(ctk.CTkFrame):
                 self.view_host,
                 controller=self.controller,
                 db_config=self.db_config,
+                on_toggle_navigation=self.toggle_navigation,
+                is_navigation_visible=self._sidebar_visible,
             )
         elif section_key == "customer_balances":
             return CustomerListReportView(
@@ -271,6 +280,7 @@ class ReportsHubView(ctk.CTkFrame):
                 self.view_host,
                 controller=self.controller,
                 db_config=self.db_config,
+                session_manager=self.session_manager,
                 on_toggle_navigation=self.toggle_navigation,
                 is_navigation_visible=self._sidebar_visible,
             )
