@@ -1445,6 +1445,10 @@ class InventoryView(ctk.CTkFrame):
 
         # Status is now index 9
         if vals[9] == "Received":
+            return messagebox.showinfo(
+                "Already Received",
+                "This order has already been processed and added to stock.",
+            )
 
         # Prevent receiving an already received order
             if vals[8] == "Received":
@@ -2272,34 +2276,53 @@ class InventoryView(ctk.CTkFrame):
             return messagebox.showwarning("Selection", "Select a supplier to delete.")
 
         vals = supp_tree.item(selected[0])["values"]
-        supplier_id = vals[0]   # raw integer PK
-        supplier_name = vals[2] # company name for display
-
-        # Warn the user that linked parts will also be unlinked
-        confirm = messagebox.askyesno(
-            "Confirm Delete",
-            f"Delete supplier '{supplier_name}'?\n\n"
-            "This will also remove all part-cost links for this supplier from the catalog.\n\n"
-            "This cannot be undone.",
-        )
-        if not confirm:
-            return
+        supplier_id  = vals[0]   # raw integer PK
+        supplier_name = vals[2]  # company name for display
 
         try:
             conn = psycopg2.connect(**(self.db_config or {}))
-            cur = conn.cursor()
+            cur  = conn.cursor()
 
-            # Step 1: Remove child rows in item_parts first (breaks the FK constraint)
+            # 1. Check for active (unreceived) purchase orders from this supplier
+            cur.execute("""
+                SELECT COUNT(*) FROM purchase_orders
+                WHERE supplier_id = %s AND received = FALSE
+            """, (supplier_id,))
+            active_po_count = cur.fetchone()[0]
+
+            if active_po_count > 0:
+                cur.close()
+                conn.close()
+                messagebox.showwarning(
+                    "Cannot Delete",
+                    f"'{supplier_name}' has {active_po_count} active Purchase Order(s) still pending.\n\n"
+                    "Please mark all POs from this supplier as received before deleting."
+                )
+                return
+
+            # 2. No active POs — safe to confirm deletion
+            confirm = messagebox.askyesno(
+                "Confirm Delete",
+                f"Delete supplier '{supplier_name}'?\n\n"
+                "This will also remove all part-cost links for this supplier.\n\n"
+                "This cannot be undone.",
+            )
+            if not confirm:
+                cur.close()
+                conn.close()
+                return
+
+            # 3. Delete child rows in correct FK order
+            cur.execute("DELETE FROM item_parts WHERE supplier_id = %s", (supplier_id,))
+
+            # 4. Delete received PO history (received = TRUE) linked to this supplier
             cur.execute(
-                "DELETE FROM item_parts WHERE supplier_id = %s",
+                "DELETE FROM purchase_orders WHERE supplier_id = %s AND received = TRUE",
                 (supplier_id,),
             )
 
-            # Step 2: Now safe to delete the supplier
-            cur.execute(
-                "DELETE FROM suppliers WHERE supplier_id = %s",
-                (supplier_id,),
-            )
+            # 5. Now safe to delete the supplier
+            cur.execute("DELETE FROM suppliers WHERE supplier_id = %s", (supplier_id,))
 
             conn.commit()
             cur.close()
@@ -2307,6 +2330,34 @@ class InventoryView(ctk.CTkFrame):
 
             messagebox.showinfo("Deleted", f"Supplier '{supplier_name}' has been removed.")
             self._load_supplier_list()
+            self._load_reorder_list()
+            self._load_reorder_candidates()
+
+            # Sync supplier dropdowns in Catalog tab
+            fresh_suppliers = self._fetch_suppliers()
+            if hasattr(self, "supplier_combo"):
+                self.supplier_combo.configure(values=fresh_suppliers)
+                self.supplier_combo.set("")
+
+            # Sync supplier dropdown in Reorder tab
+            if hasattr(self, "reorder_supp"):
+                self.reorder_supp.configure(values=fresh_suppliers)
+                self.reorder_supp.set("")
+
+            # Sync Suppliers tab part combo (in case linked parts changed)
+            if hasattr(self, "all_part_options"):
+                self.all_part_options = (
+                    [r[1] for r in self._parts_rows]
+                    if self._parts_rows
+                    else ["No parts available"]
+                )
+                if hasattr(self, "supp_part_combo"):
+                    self.supp_part_combo.configure(values=self.all_part_options)
+                    self.supp_part_combo.set("")
+
+            # Clear the PO sidebar total since the selected supplier may be gone
+            if hasattr(self, "po_total_label"):
+                self.po_total_label.configure(text="Total: ₱0.00")
 
         except Exception as e:
             messagebox.showerror("DB Error", str(e))
