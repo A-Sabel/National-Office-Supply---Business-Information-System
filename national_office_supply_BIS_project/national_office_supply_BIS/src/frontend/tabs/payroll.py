@@ -510,10 +510,10 @@ class _AuditPanel(ctk.CTkFrame):
             command=self._on_week_change,
         ).pack(side="left", padx=(0, 10))
 
-        sun = self._week + timedelta(days=6)
+        mon = self._week - timedelta(days=5)
         self._week_lbl = ctk.CTkLabel(
             picker_frame,
-            text=f"({self._week.strftime('%b %d')} – {sun.strftime('%b %d, %Y')})",
+            text=f"({mon.strftime('%b %d')} – {self._week.strftime('%b %d, %Y')})",
             font=("Segoe UI", 10),
             text_color="#7f8c8d",
         )
@@ -745,13 +745,26 @@ class _AuditPanel(ctk.CTkFrame):
             "Commission (5%)",
             "Status",
         )
+        comm_card.grid_columnconfigure(0, weight=1)
+        comm_card.grid_rowconfigure(1, weight=1)
+
+        comm_tree_frame = ctk.CTkFrame(comm_card, fg_color="transparent")
+        comm_tree_frame.grid(row=1, column=0, sticky="nsew", padx=8, pady=(0, 8))
+
+        cvsb = ttk.Scrollbar(comm_tree_frame, orient="vertical")
+        cvsb.pack(side="right", fill="y")
+
         self._comm_tree = ttk.Treeview(
-            comm_card,
+            comm_tree_frame,
             columns=comm_cols,
             show="headings",
             height=10,
             style="Comm.Treeview",
+            yscrollcommand=cvsb.set,
         )
+        cvsb.configure(command=self._comm_tree.yview)
+        self._comm_tree.pack(side="left", fill="both", expand=True)
+
         for col, w, anc, stretch in [
             ("Emp #", 60, "center", False),
             ("Sales Representative", 110, "w", True),
@@ -783,16 +796,6 @@ class _AuditPanel(ctk.CTkFrame):
         self._comm_tree.tag_configure("odd", background="#f7f9fb", foreground="#2c3e50")
         self._comm_tree.tag_configure("paid", foreground="#1e8449")
         self._comm_tree.tag_configure("pending", foreground="#d35400")
-
-        comm_card.grid_columnconfigure(0, weight=1)
-        comm_card.grid_rowconfigure(1, weight=1)
-
-        cvsb = ttk.Scrollbar(
-            comm_card, orient="vertical", command=self._comm_tree.yview
-        )
-        self._comm_tree.configure(yscrollcommand=cvsb.set)
-        cvsb.grid(row=1, column=1, sticky="ns", padx=(0, 6), pady=(0, 8))
-        self._comm_tree.grid(row=1, column=0, sticky="nsew", padx=(8, 0), pady=(0, 8))
 
         # ── QD-Sec2 — Weekly Payroll Check File ──────────────────────────────
         pay_card = ctk.CTkFrame(
@@ -846,13 +849,26 @@ class _AuditPanel(ctk.CTkFrame):
             "Hourly Wage",
             "Gross Pay",
         )
+        pay_card.grid_columnconfigure(0, weight=1)
+        pay_card.grid_rowconfigure(1, weight=1)
+
+        pay_tree_frame = ctk.CTkFrame(pay_card, fg_color="transparent")
+        pay_tree_frame.grid(row=1, column=0, sticky="nsew", padx=8, pady=(0, 8))
+
+        pvsb = ttk.Scrollbar(pay_tree_frame, orient="vertical")
+        pvsb.pack(side="right", fill="y")
+
         self._pay_tree = ttk.Treeview(
-            pay_card,
+            pay_tree_frame,
             columns=pay_cols,
             show="headings",
             height=10,
             style="Pay.Treeview",
+            yscrollcommand=pvsb.set,
         )
+        pvsb.configure(command=self._pay_tree.yview)
+        self._pay_tree.pack(side="left", fill="both", expand=True)
+
         for col, w, anc, stretch in [
             ("Emp #", 60, "center", False),
             ("Employee Name", 160, "w", True),
@@ -873,11 +889,6 @@ class _AuditPanel(ctk.CTkFrame):
 
         self._pay_tree.tag_configure("even", background="#ffffff", foreground="#2c3e50")
         self._pay_tree.tag_configure("odd", background="#f7f9fb", foreground="#2c3e50")
-
-        pvsb = ttk.Scrollbar(pay_card, orient="vertical", command=self._pay_tree.yview)
-        self._pay_tree.configure(yscrollcommand=pvsb.set)
-        pvsb.grid(row=1, column=1, sticky="ns", padx=(0, 6), pady=(0, 8))
-        self._pay_tree.grid(row=1, column=0, sticky="nsew", padx=(8, 0), pady=(0, 8))
 
         self._load_db()
 
@@ -900,15 +911,15 @@ class _AuditPanel(ctk.CTkFrame):
             )
             self._picker_field.set_date(self._week)
             return
-        # Snap to Monday of the chosen week
-        monday = picked - timedelta(days=picked.weekday())
-        self._week = monday
-        # Update the picker entry to the snapped Monday
-        self._picker_field.set_date(monday)
-        # Update the range label
-        sun = monday + timedelta(days=6)
+        # Snap to Saturday (week-ending) of the chosen week — matches DB week_date
+        saturday = picked + timedelta(days=(5 - picked.weekday()) % 7)
+        self._week = saturday
+        # Update the picker entry to the snapped Saturday
+        self._picker_field.set_date(saturday)
+        # Update the range label: show Mon – Sat
+        mon = saturday - timedelta(days=5)
         self._week_lbl.configure(
-            text=f"({monday.strftime('%b %d')} – {sun.strftime('%b %d, %Y')})"
+            text=f"({mon.strftime('%b %d')} – {saturday.strftime('%b %d, %Y')})"
         )
         self._load_db()
 
@@ -2119,16 +2130,15 @@ class _PayrollHistoryPanel(ctk.CTkFrame):
             command=self._load_db,
         ).grid(row=0, column=1, sticky="e")
 
-        # ── summary strip ─────────────────────────────────────────────────────
+        # ── summary strip (single line) ───────────────────────────────────────
         strip = ctk.CTkFrame(
             self,
             fg_color="#ffffff",
-            corner_radius=12,
+            corner_radius=10,
             border_width=1,
             border_color="#e0e0e0",
         )
         strip.grid(row=1, column=0, sticky="ew", pady=(0, 10))
-        strip.grid_columnconfigure((0, 1, 2), weight=1)
 
         self._lbl_total = ctk.CTkLabel(
             strip,
@@ -2136,12 +2146,16 @@ class _PayrollHistoryPanel(ctk.CTkFrame):
             font=("Segoe UI", 12, "bold"),
             text_color="#1a2d5a",
         )
-        self._lbl_total.grid(row=0, column=0, padx=16, pady=12, sticky="w")
+        self._lbl_total.pack(side="left", padx=(20, 0), pady=10)
+
+        ctk.CTkLabel(strip, text="│", font=("Segoe UI", 14), text_color="#d0d7de").pack(side="left", padx=16, pady=10)
 
         self._lbl_hourly = ctk.CTkLabel(
             strip, text="Hourly Checks: —", font=("Segoe UI", 12), text_color="#27ae60"
         )
-        self._lbl_hourly.grid(row=0, column=1, padx=16, pady=12)
+        self._lbl_hourly.pack(side="left", pady=10)
+
+        ctk.CTkLabel(strip, text="│", font=("Segoe UI", 14), text_color="#d0d7de").pack(side="left", padx=16, pady=10)
 
         self._lbl_comm = ctk.CTkLabel(
             strip,
@@ -2149,7 +2163,7 @@ class _PayrollHistoryPanel(ctk.CTkFrame):
             font=("Segoe UI", 12),
             text_color="#8e44ad",
         )
-        self._lbl_comm.grid(row=0, column=2, padx=16, pady=12, sticky="e")
+        self._lbl_comm.pack(side="left", pady=10)
 
         # ── table card ────────────────────────────────────────────────────────
         card = ctk.CTkFrame(
@@ -2263,12 +2277,10 @@ class _PayrollHistoryPanel(ctk.CTkFrame):
         grand = float(h.get("total", 0) or 0) + float(c.get("total", 0) or 0)
         self._lbl_total.configure(text=f"Total Paid: P{grand:,.2f}")
         self._lbl_hourly.configure(
-            text=f"Hourly Checks: {h.get('cnt', 0)}  "
-            f"(P{float(h.get('total', 0) or 0):,.2f})"
+            text=f"Hourly Checks: {h.get('cnt', 0)}  (P{float(h.get('total', 0) or 0):,.2f})"
         )
         self._lbl_comm.configure(
-            text=f"Commission Checks: {c.get('cnt', 0)}  "
-            f"(P{float(c.get('total', 0) or 0):,.2f})"
+            text=f"Commission Checks: {c.get('cnt', 0)}  (P{float(c.get('total', 0) or 0):,.2f})"
         )
 
         if not rows:
