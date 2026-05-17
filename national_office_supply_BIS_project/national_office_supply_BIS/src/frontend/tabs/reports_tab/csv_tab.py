@@ -527,43 +527,56 @@ def export_weekly_sales(parent, rows: list):
 
 
 def export_inventory(parent, rows: list):
-    """Inventory Report — no date column; exports all visible rows."""
-    p_from, p_to = _detect_prefill(parent)
-    open_export_dialog(
+    """Inventory Report — no date filter; exports all visible rows directly."""
+    if not rows:
+        messagebox.showinfo("Export", "No records to export.", parent=parent)
+        return
+    today = datetime.date.today().strftime("%Y-%m-%d")
+    filepath = fd.asksaveasfilename(
         parent=parent,
-        title="Inventory Report",
-        default_name="inventory_report",
-        headers=[
-            "Part No.",
-            "Description",
-            "Sell Price",
-            "In Stock",
-            "Trigger",
-            "On Order",
-            "Status",
-        ],
-        rows=rows,
-        date_col_index=None,
-        date_label="",
-        prefill_from=p_from,
-        prefill_to=p_to,
+        defaultextension=".csv",
+        filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+        initialfile=f"inventory_report_{today}.csv",
+        title="Save Inventory Report",
     )
+    if not filepath:
+        return
+    headers = ["Part No.", "Description", "Sell Price", "In Stock", "Trigger", "On Order", "Status"]
+    try:
+        with open(filepath, "w", newline="", encoding="utf-8-sig") as f:
+            writer = csv.writer(f)
+            writer.writerow(headers)
+            for row in rows:
+                writer.writerow(_row_values(row))
+        messagebox.showinfo("Export Complete", "Export Complete: " + str(len(rows)) + " records exported to:\n" + filepath, parent=parent)
+    except Exception as ex:
+        messagebox.showerror("Export Failed", str(ex), parent=parent)
 
 
 def export_stock_ordering(parent, rows: list, headers: list[str]):
-    """Stock Ordering Report — no date column; exports all visible rows."""
-    p_from, p_to = _detect_prefill(parent)
-    open_export_dialog(
+    """Stock Ordering Report — no date filter; exports all visible rows directly."""
+    if not rows:
+        messagebox.showinfo("Export", "No records to export.", parent=parent)
+        return
+    today = datetime.date.today().strftime("%Y-%m-%d")
+    filepath = fd.asksaveasfilename(
         parent=parent,
-        title="Stock Ordering Report",
-        default_name="stock_ordering",
-        headers=headers,
-        rows=rows,
-        date_col_index=None,
-        date_label="",
-        prefill_from=p_from,
-        prefill_to=p_to,
+        defaultextension=".csv",
+        filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+        initialfile=f"stock_ordering_{today}.csv",
+        title="Save Stock Ordering Report",
     )
+    if not filepath:
+        return
+    try:
+        with open(filepath, "w", newline="", encoding="utf-8-sig") as f:
+            writer = csv.writer(f)
+            writer.writerow(headers)
+            for row in rows:
+                writer.writerow(_row_values(row))
+        messagebox.showinfo("Export Complete", "Export Complete: " + str(len(rows)) + " records exported to:\n" + filepath, parent=parent)
+    except Exception as ex:
+        messagebox.showerror("Export Failed", str(ex), parent=parent)
 
 
 def export_backlog(parent, rows: list):
@@ -592,26 +605,30 @@ def export_backlog(parent, rows: list):
 
 
 def export_customer_balances(parent, rows: list):
-    """Customer List & Balances — no date column."""
-    p_from, p_to = _detect_prefill(parent)
-    open_export_dialog(
+    """Customer List & Balances — no date filter; exports all visible rows directly."""
+    if not rows:
+        messagebox.showinfo("Export", "No records to export.", parent=parent)
+        return
+    today = datetime.date.today().strftime("%Y-%m-%d")
+    filepath = fd.asksaveasfilename(
         parent=parent,
-        title="Customer List & Balances",
-        default_name="customer_list",
-        headers=[
-            "Cust. No.",
-            "Company",
-            "Address",
-            "Phone",
-            "Current Balance",
-            "Status",
-        ],
-        rows=rows,
-        date_col_index=None,
-        date_label="",
-        prefill_from=p_from,
-        prefill_to=p_to,
+        defaultextension=".csv",
+        filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+        initialfile=f"customer_list_{today}.csv",
+        title="Save Customer List & Balances",
     )
+    if not filepath:
+        return
+    headers = ["Cust. No.", "Company", "Address", "Phone", "Current Balance", "Status"]
+    try:
+        with open(filepath, "w", newline="", encoding="utf-8-sig") as f:
+            writer = csv.writer(f)
+            writer.writerow(headers)
+            for row in rows:
+                writer.writerow(_row_values(row))
+        messagebox.showinfo("Export Complete", "Export Complete: " + str(len(rows)) + " records exported to:\n" + filepath, parent=parent)
+    except Exception as ex:
+        messagebox.showerror("Export Failed", str(ex), parent=parent)
 
 
 def export_customer_payments(parent, rows: list, headers: list[str]):

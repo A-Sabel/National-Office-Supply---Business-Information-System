@@ -38,9 +38,11 @@ class DashboardView(ctk.CTkScrollableFrame):
         )
 
         # Use Decimal for safe arithmetic with DB Decimal types
+        # Recommend a realistic default goal based on seeded Sales Rep YTD figures.
+        # Median YTD in the seed data ≈ 112,450.80; use a rounded, achievable target of ₱110,000
         try:
             self.sales_goal_target = Decimal(
-                str((self.db_config or {}).get("sales_goal_target", 80000))
+                str((self.db_config or {}).get("sales_goal_target", 110000))
             )
         except (InvalidOperation, TypeError):
             self.sales_goal_target = Decimal("80000")
@@ -55,9 +57,11 @@ class DashboardView(ctk.CTkScrollableFrame):
         self.header_frame = ctk.CTkFrame(self, fg_color="transparent")
         self.header_frame.grid(row=0, column=0, sticky="ew", padx=30, pady=(25, 0))
 
+        # Display-friendly role (keep internal role strings unchanged for logic)
+        role_display = "Regular" if self.role == "Hourly" else self.role
         self.welcome_label = ctk.CTkLabel(
             self.header_frame,
-            text=f"Welcome back, {self.username} - {self.role}",
+            text=f"Welcome back, {self.username} - {role_display}",
             font=("Segoe UI", 28, "bold"),
             text_color="#2c3e50",
         )
@@ -428,7 +432,7 @@ class DashboardView(ctk.CTkScrollableFrame):
                 )
                 recent_rows = cur.fetchall()
 
-            else:
+            elif self.is_hourly:
                 if not emp_id:
                     raise ValueError(
                         "Missing session employee_number for Hourly dashboard scoping."
@@ -509,6 +513,17 @@ class DashboardView(ctk.CTkScrollableFrame):
                 except Exception:
                     self.orders_card.update_value("₱0.00")
                 self.cust_card.update_value(str(pending_logs))
+            else:
+                # Role is not Manager, Sales Rep, or Hourly — be explicit and safe
+                logger.debug(
+                    "Dashboard role '%s' not recognized for specialized queries; skipping role-specific data.",
+                    self.role,
+                )
+                # Ensure cards show a neutral state
+                self.rev_card.update_value("N/A")
+                self.orders_card.update_value("N/A")
+                self.cust_card.update_value("N/A")
+                self.stock_card.update_value("N/A")
 
             # Populate Treeview
             for row in self.recent_tree.get_children():

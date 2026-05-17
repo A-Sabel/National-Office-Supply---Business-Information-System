@@ -911,15 +911,10 @@ class _AuditPanel(ctk.CTkFrame):
             )
             self._picker_field.set_date(self._week)
             return
-        # Snap to Saturday (week-ending) of the chosen week — matches DB week_date
-        saturday = picked + timedelta(days=(5 - picked.weekday()) % 7)
-        self._week = saturday
-        # Update the picker entry to the snapped Saturday
-        self._picker_field.set_date(saturday)
-        # Update the range label: show Mon – Sat
-        mon = saturday - timedelta(days=5)
+        self._week = picked
+        self._picker_field.set_date(picked)
         self._week_lbl.configure(
-            text=f"({mon.strftime('%b %d')} – {saturday.strftime('%b %d, %Y')})"
+            text=f"Week of {picked.strftime('%b %d, %Y')}"
         )
         self._load_db()
 
