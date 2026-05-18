@@ -100,11 +100,18 @@ def _get_date_from_row(row, date_col_index: int | None, dict_date_key: str | Non
     return None
 
 
+def _escape_excel(value) -> object:
+    """Prevent Excel from interpreting strings starting with +, -, =, or @ as formulas."""
+    if isinstance(value, str) and value and value[0] in ("+", "-", "=", "@"):
+        return f'="{value}"'
+    return value
+
+
 def _row_values(row) -> list:
     """Return a flat list of values regardless of whether row is dict or sequence."""
     if isinstance(row, dict):
-        return list(row.values())
-    return list(row)
+        return [_escape_excel(v) for v in row.values()]
+    return [_escape_excel(v) for v in row]
 
 
 # ── main public function ──────────────────────────────────────────────────────
