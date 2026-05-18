@@ -5,6 +5,7 @@ from datetime import datetime, date, timedelta
 from backend.employee_service import EmployeeService
 from backend.audit_logger import write_audit_log
 from backend.timecard_service import TimecardService
+from backend.crypto_utils import CryptoUtils
 from frontend.modular.date_picker import DatePickerField
 
 try:
@@ -353,6 +354,18 @@ class _WorkerFilesPanel(ctk.CTkFrame):
                 "Hourly": "Regular",
                 "Sales Rep": "Sales Representative",
             }
+            # Decrypt SSNs once at load time; store plaintext in memory only.
+            # The DB holds ciphertext, so we must decrypt before masking or displaying.
+            def _decrypt_safe(encrypted_ssn) -> str:
+                try:
+                    return CryptoUtils.decrypt_ssn(str(encrypted_ssn)) if encrypted_ssn else ""
+                except Exception:
+                    return str(encrypted_ssn)  # fallback: show as-is if not encrypted
+
+            self._full_ssns = {
+                r["employee_number"]: _decrypt_safe(r["ssn"]) for r in rows
+            }
+
             self._all_rows = [
                 (
                     r["employee_number"],
@@ -363,12 +376,11 @@ class _WorkerFilesPanel(ctk.CTkFrame):
                         if r.get("hourly_wage") is not None
                         else "N/A"
                     ),
-                    "***-**-" + str(r["ssn"])[-4:],
+                    "***-**-" + self._full_ssns.get(r["employee_number"], "")[-4:],
                     "👁",
                 )
                 for r in rows
             ]
-            self._full_ssns = {r["employee_number"]: r["ssn"] for r in rows}
 
         except Exception as e:
             messagebox.showerror("DB Error", f"Could not load employees:\n{e}")
@@ -1253,7 +1265,13 @@ class _AuditPanel(ctk.CTkFrame):
     def _export_csv(self):
         """Export this week's payroll to CSV: hourly gross + rep commission."""
         import csv
+        import os
+        from pathlib import Path
         from tkinter import filedialog
+
+        # Create payroll_exports/ folder next to the project root if it doesn't exist
+        exports_dir = Path(__file__).resolve().parent.parent.parent / "payroll_exports"
+        exports_dir.mkdir(parents=True, exist_ok=True)
 
         week_end = self._week + timedelta(days=6)
 
@@ -1296,10 +1314,11 @@ class _AuditPanel(ctk.CTkFrame):
             messagebox.showerror("DB Error", f"Export failed:\n{e}")
             return
 
-        # Ask user where to save
+        # Ask user where to save — default into the exports folder
         filepath = filedialog.asksaveasfilename(
             defaultextension=".csv",
             filetypes=[("CSV files", "*.csv")],
+            initialdir=str(exports_dir),
             initialfile=f"payroll_{self._week.strftime('%Y-%m-%d')}.csv",
             title="Save Payroll CSV",
         )
@@ -1320,12 +1339,12 @@ class _AuditPanel(ctk.CTkFrame):
                     ]
                 )
                 for r in hourly_rows:
-                    gross = float(r["gross"])
+                    gross = round(float(r["hours_worked"] or 0) * float(r["hourly_wage"] or 0), 2)
                     writer.writerow(
                         [
                             r["employee_number"],
                             r["employee_name"],
-                            r["pay_type"],
+                            "Hourly",
                             f"{gross:.2f}",
                             "0.00",
                             f"{gross:.2f}",
